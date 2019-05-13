@@ -11,8 +11,8 @@ I convert the nanopolish methylation calling output into bed-style format, such 
 where Methylation call string is arranged such that 
 - numbers are separated by methylation calls
 - each number is cumulative distance from the "start"
-- "m" means methylated, "u" means unmethylated, and "x" means uncalled (not confident)
 - methylation call corresponds to the motif at position preceding the letter
+- "m" means methylated, "u" means unmethylated, and "x" means uncalled (not confident)
 
 The resulting bed-style file is sorted, bgzipped, and tabix indexed for easy manipulation.
 
