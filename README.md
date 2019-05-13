@@ -14,4 +14,15 @@ where Methylation call string is arranged such that
 - "m" means methylated, "u" means unmethylated, and "x" means uncalled (not confident)
 - methylation call corresponds to the motif at position preceding the letter
 
+The resulting bed-style file is sorted, bgzipped, and tabix indexed for easy manipulation.
+
+```
+mtsv2bedGraph.py -i [path/to/nanopolish/methylation.tsv] |\
+  sort -k1,1 -k2,2n | bgzip > [methylation.bed.gz]
+tabix -p bed [methylation.bed.gz]
+```
+
+converting bam for igv
+------
+Using the original bam file and the converted bed-style methylation file, methylation motifs can be "bisulfite converted _in silico_" for easy visualization on IGV via their bisulfite mode.
 
