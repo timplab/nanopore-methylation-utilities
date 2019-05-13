@@ -135,12 +135,12 @@ def convert_nome(bam,cpg,gpc) :
     bam_cpg = change_sequence(bam,cpg,"cpg") 
     return change_sequence(bam_cpg,gpc,"gpc")
 
-def reset_bam(bam,genome_dict) :
+def reset_bam(bam,genome_seq) :
     try : 
         refseq = bam.get_reference_sequence()
     except ValueError :
         # MD tag not present in minimap2
-        refseq = str(genome_dict[bam.reference_name][ 
+        refseq = str(genome_seq.seq[ 
                 bam.reference_start:
                 bam.reference_end])
     bam.query_sequence = refseq.upper()
@@ -183,7 +183,7 @@ def change_sequence(bam,calls,mod="cpg") :
     bam.query_sequence = ''.join(seq)
     return bam
 
-def convertBam(bampath,genome_dict,cfunc,cpgpath,gpcpath,window,verbose,q) :
+def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,verbose,q) :
 #    if verbose : print("reading {} from bam file".format(window),file=sys.stderr)
     with pysam.AlignmentFile(bampath,"rb") as bam :
         bam_entries = [x for x in bam.fetch(region=window)]
@@ -204,7 +204,7 @@ def convertBam(bampath,genome_dict,cfunc,cpgpath,gpcpath,window,verbose,q) :
         except KeyError : 
             continue
         i += 1
-        newbam = reset_bam(bam,genome_dict)
+        newbam = reset_bam(bam,genome_seq)
         convertedbam = cfunc(newbam,cpg,gpc)
         q.put(convertedbam.to_string())
     if verbose : print("converted {} bam entries in {}".format(i,window),file=sys.stderr)
@@ -225,11 +225,13 @@ def main() :
         sys.exit()
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
     # read in fasta
-    genome_dict = dict()
     if args.fasta :
-        with open(args.fasta) as handle :
-            for record in SeqIO.parse(handle,"fasta") :
-                genome_dict[record.id] = record.seq
+        if args.verbose : 
+            print("indexing fasta file",file=sys.stderr)
+        genome_dict = SeqIO.index(args.fasta,"fasta")
+#        with open(args.fasta) as handle :
+#            for record in SeqIO.parse(handle,"fasta") :
+#                genome_dict[record.id] = record.seq
     # initialize mp
     manager = mp.Manager()
     q = manager.Queue()
@@ -241,9 +243,14 @@ def main() :
     if args.gpc is None : converter = convert_cpg
     else : converter = convert_nome
     # start processing
-    jobs = [ pool.apply_async(convertBam,
-        args = (args.bam,genome_dict,converter,args.cpg,args.gpc,win,args.verbose,q))
-        for win in windows ]
+    if args.fasta : 
+        jobs = [ pool.apply_async(convertBam,
+            args = (args.bam,genome_dict[win.split(":")[0]],converter,args.cpg,args.gpc,win,args.verbose,q))
+            for win in windows ]
+    else : 
+        jobs = [ pool.apply_async(convertBam,
+            args = (args.bam,0,converter,args.cpg,args.gpc,win,args.verbose,q))
+            for win in windows ]
     output = [ p.get() for p in jobs ]
     # done
     q.put('kill')

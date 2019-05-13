@@ -30,6 +30,8 @@ There are three options for specifying the region to convert:
 - `-w,--window` : for one region, supply the coordinate (chr:start-end)
 
 ```
-./convert_bam_for_methylation.py -b [path/to/sorted.bam] -c [path/to/cpg.methylation.bed.gz] \
-  -a [path/to/fasta.fai] -o [path/to/converted.bam]
+./convert_bam_for_methylation.py -b [path/to/sorted.bam] \
+  -c [path/to/cpg.methylation.bed.gz] -a [path/to/fasta.fai] |\
+  samtools sort -o [path/to/converted.bam]
+samtools index [path/to/cnverted.bam]
 ```
