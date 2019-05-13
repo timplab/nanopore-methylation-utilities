@@ -30,6 +30,7 @@ There are three options for specifying the region to convert:
 - `-w,--window` : for one region, supply the coordinate (chr:start-end)
 
 For minimap2 alignments : the default output does not have MD tags, and MD tags are necessary for using pysam to get the reference sequence. To get around this, the fasta of reference genome must be supplied via `-f,--fasta`.
+
 This also makes the process slower and memory intensive than using ngmlr reads or aligning minimap2 with `--MD` option
 
 ```
