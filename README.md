@@ -14,8 +14,7 @@ where Methylation call string is arranged such that
 - methylation call corresponds to the motif at position preceding the letter
 - "m" means methylated, "u" means unmethylated, and "x" means uncalled (not confident)
 
-The resulting bed-style file is sorted, bgzipped, and tabix indexed for easy manipulation.
-
+The resulting bed-style file is sorted, [bgzipped](http://www.htslib.org/doc/bgzip.html), and [tabix](http://www.htslib.org/doc/tabix.html) indexed for easy manipulation.  
 ```
 ./mtsv2bedGraph.py -i [path/to/nanopolish/methylation.tsv] |\
   sort -k1,1 -k2,2n | bgzip > [methylation.bed.gz]
