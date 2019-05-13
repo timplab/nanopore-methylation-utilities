@@ -24,8 +24,8 @@ tabix -p bed [methylation.bed.gz]
 
 converting bam for igv
 ------
-Using the original bam file and the converted bed-style methylation file, methylation motifs can be "bisulfite converted _in silico_" for easy visualization on IGV via their bisulfite mode.
-There are three options for specifying the region to perform the conversion:
+Using the converted bed-style methylation file, bam files can be "bisulfite converted _in silico_" for easy visualization on IGV via their bisulfite mode.
+There are three options for specifying the region to convert:
 - `-a,--fai` : for the entire genome, supply the fasta fai index
 - `-r,--regions` : for multiple regions, supply the bed file
 - `-w,--window` : for one region, supply the coordinate (chr:start-end)
