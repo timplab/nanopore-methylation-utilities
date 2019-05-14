@@ -139,10 +139,14 @@ def reset_bam(bam,genome_seq) :
     try : 
         refseq = bam.get_reference_sequence()
     except ValueError :
-        # MD tag not present in minimap2
-        refseq = str(genome_seq.seq[ 
-                bam.reference_start:
-                bam.reference_end])
+        try : 
+            # MD tag not present in minimap2
+            refseq = str(genome_seq.seq[ 
+                    bam.reference_start:
+                    bam.reference_end])
+        except :
+            print("supply the reference genome (-f,--fasta",file=sys.stderr)
+            sys.exit()
     bam.query_sequence = refseq.upper()
     bam.cigarstring = ''.join([str(len(refseq)),"M"])
     return bam
