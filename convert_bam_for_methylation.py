@@ -194,10 +194,16 @@ def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,verbose,q) :
 #    if verbose : print("{} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     if len(bam_entries) == 0 : return
 #    if verbose : print("reading {} from cpg data".format(window),file=sys.stderr)
-    cpg_calldict = read_tabix(cpgpath,window)
+    try : cpg_calldict = read_tabix(cpgpath,window)
+    except ValueError :
+        if verbose :
+            print("No CpG methylation in {}, moving on".format(window),file=sys.stderr)
 #    if verbose : print("reading {} from gpc data".format(window),file=sys.stderr)
     try: gpc_calldict = read_tabix(gpcpath,window)
     except TypeError : gpc_calldict = cpg_calldict # no gpc provided, repace with cpg for quick fix
+    except ValueError :
+        if verbose :
+            print("No GpC methylation in {}, moving on".format(window),file=sys.stderr)
 #    if verbose : print("converting {} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     i = 0
     for bam in bam_entries :
