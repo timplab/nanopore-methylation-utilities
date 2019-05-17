@@ -177,13 +177,13 @@ def change_sequence(bam,calls,mod="cpg") :
     elif mod == "gpc" :
         seq = np.array(list(bam.query_sequence.replace("GC",dinuc)))
 #    seq[gsites-offset] = g
-    # methylated
-    meth = calls[np.where(calls[:,1]==1),0]+offset
-    seq[np.isin(pos,meth)] = m
-    # unmethylated
-    meth = calls[np.where(calls[:,1]==0),0]+offset
-    seq[np.isin(pos,meth)] = u
-    
+    if calls is not 0 :
+        # methylated
+        meth = calls[np.where(calls[:,1]==1),0]+offset
+        seq[np.isin(pos,meth)] = m
+        # unmethylated
+        meth = calls[np.where(calls[:,1]==0),0]+offset
+        seq[np.isin(pos,meth)] = u
     bam.query_sequence = ''.join(seq)
     return bam
 
@@ -198,21 +198,24 @@ def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,verbose,q) :
     except ValueError :
         if verbose :
             print("No CpG methylation in {}, moving on".format(window),file=sys.stderr)
+        return
 #    if verbose : print("reading {} from gpc data".format(window),file=sys.stderr)
     try: gpc_calldict = read_tabix(gpcpath,window)
     except TypeError : gpc_calldict = cpg_calldict # no gpc provided, repace with cpg for quick fix
     except ValueError :
         if verbose :
             print("No GpC methylation in {}, moving on".format(window),file=sys.stderr)
+        return
 #    if verbose : print("converting {} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     i = 0
     for bam in bam_entries :
         qname = bam.query_name
-        try :
-            cpg = cpg_calldict[qname]
-            gpc = gpc_calldict[qname]
+        try : cpg = cpg_calldict[qname]
         except KeyError : 
-            continue
+            cpg = 0
+        try : gpc = gpc_calldict[qname]
+        except KeyError : 
+            gpc = 0
         i += 1
         newbam = reset_bam(bam,genome_seq)
         convertedbam = cfunc(newbam,cpg,gpc)
