@@ -7,7 +7,7 @@ import argparse
 import gzip
 import numpy as np
 from collections import namedtuple
-from methylbed_utils import MethRead,make_coord,bed_to_coord
+from methylbed_utils import MethRead,make_coord,bed_to_coord,coord_to_bed
 import pysam
 from Bio import SeqIO
 import re
@@ -42,6 +42,8 @@ def parseArgs() :
             help="genome fasta index for converting the entire genome")
     parser.add_argument('-o','--out',type=str,required=False,default="stdout",
             help="output bam file (default: stdout)")
+    parser.add_argument('--all',action='store_true',default=False,
+            help="print reads with no methylation data (default False)")
     # parse args
     args = parser.parse_args()
     args.srcdir=srcdir
@@ -141,11 +143,11 @@ def reset_bam(bam,genome_seq) :
     except ValueError :
         try : 
             # MD tag not present in minimap2
-            refseq = str(genome_seq.seq[ 
+            refseq = genome_seq[ 
                     bam.reference_start:
-                    bam.reference_end])
+                    bam.reference_end]
         except :
-            print("supply the reference genome (-f,--fasta",file=sys.stderr)
+            print("supply the reference genome (-f,--fasta)",file=sys.stderr)
             sys.exit()
     bam.query_sequence = refseq.upper()
     bam.cigarstring = ''.join([str(len(refseq)),"M"])
@@ -187,7 +189,7 @@ def change_sequence(bam,calls,mod="cpg") :
     bam.query_sequence = ''.join(seq)
     return bam
 
-def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,verbose,q) :
+def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verbose,q) :
 #    if verbose : print("reading {} from bam file".format(window),file=sys.stderr)
     with pysam.AlignmentFile(bampath,"rb") as bam :
         bam_entries = [x for x in bam.fetch(region=window)]
@@ -219,6 +221,9 @@ def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,verbose,q) :
         i += 1
         newbam = reset_bam(bam,genome_seq)
         convertedbam = cfunc(newbam,cpg,gpc)
+        if not print_nometh :
+            if cpg is 0 or gpc is 0 :
+                continue
         q.put(convertedbam.to_string())
     if verbose : print("converted {} bam entries in {}".format(i,window),file=sys.stderr)
 
@@ -239,12 +244,7 @@ def main() :
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
     # read in fasta
     if args.fasta :
-        if args.verbose : 
-            print("indexing fasta file",file=sys.stderr)
-        genome_dict = SeqIO.index(args.fasta,"fasta")
-#        with open(args.fasta) as handle :
-#            for record in SeqIO.parse(handle,"fasta") :
-#                genome_dict[record.id] = record.seq
+        fasta = pysam.FastaFile(args.fasta)
     # initialize mp
     manager = mp.Manager()
     q = manager.Queue()
@@ -257,12 +257,17 @@ def main() :
     else : converter = convert_nome
     # start processing
     if args.fasta : 
-        jobs = [ pool.apply_async(convertBam,
-            args = (args.bam,genome_dict[win.split(":")[0]],converter,args.cpg,args.gpc,win,args.verbose,q))
-            for win in windows ]
+        jobs = list()
+        for win in windows : 
+            chrom,start,end = coord_to_bed(win)
+            seq = fasta.fetch(reference=chrom).upper()
+            jobs.append(pool.apply_async(convertBam,
+                args = (args.bam,seq,converter,args.cpg,args.gpc,
+                    win,args.all,args.verbose,q)))
     else : 
         jobs = [ pool.apply_async(convertBam,
-            args = (args.bam,0,converter,args.cpg,args.gpc,win,args.verbose,q))
+            args = (args.bam,0,converter,args.cpg,args.gpc,
+                win,args.all,args.verbose,q))
             for win in windows ]
     output = [ p.get() for p in jobs ]
     # done
