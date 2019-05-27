@@ -28,8 +28,6 @@ def parseArgs() :
             help="verbose output")
     parser.add_argument('-b','--bam',type=os.path.abspath,required=True,
             help="bam file - sorted and indexed")
-    parser.add_argument('-f','--fasta',type=os.path.abspath,required=False,
-            help="genome fasta file, needed for minimap2 reads without MD tag")
     parser.add_argument('-c','--cpg',type=os.path.abspath,required=True,
             help="gpc methylation bed - sorted, bgzipped, and indexed")
     parser.add_argument('-g','--gpc',type=os.path.abspath,required=False,
@@ -37,9 +35,7 @@ def parseArgs() :
     parser.add_argument('-w','--window',type=str,required=False, 
             help="window from index file to extract [chrom:start-end]")
     parser.add_argument('-r','--regions',type=argparse.FileType('r'),required=False, 
-            help="windows in bed format (default: stdin)")
-    parser.add_argument('-a','--fai',type=argparse.FileType('r'),required=False, 
-            help="genome fasta index for converting the entire genome")
+            help="windows in bed file (default: stdin)")
     parser.add_argument('-o','--out',type=str,required=False,default="stdout",
             help="output bam file (default: stdout)")
     parser.add_argument('--all',action='store_true',default=False,
@@ -115,17 +111,17 @@ def listener(q,inbam,outbam,verbose=False) :
     f.close()
     q.task_done()
 
-def get_windows_from_fai(faifh,winsize = 100000) :
-    coords = list()
-    for line in faifh : 
-        fields = line.strip().split() 
-        contig = fields[0] 
-        contigsize = int(fields[1]) 
-        numbins = math.ceil(contigsize/winsize) 
-        wins = [ [x*winsize+1,(x+1)*winsize] for x in range(numbins) ] 
-        wins[-1][1] = contigsize 
-        for win in wins :
-            coords.append(make_coord(contig,win[0],win[1]))
+def get_windows_from_bam(bampath,winsize = 100000) :
+    with pysam.AlignmentFile(bampath,"rb") as bam :
+        contigs = bam.references
+        lengths = bam.lengths
+        coords = list()
+        for contig,contigsize in zip(contigs,lengths) : 
+            numbins = math.ceil(contigsize/winsize) 
+            wins = [ [x*winsize+1,(x+1)*winsize] for x in range(numbins) ] 
+            wins[-1][1] = contigsize 
+            for win in wins : 
+                coords.append(make_coord(contig,win[0],win[1]))
     return coords
 
 def convert_cpg(bam,cpg,gpc) :
@@ -234,12 +230,11 @@ def main() :
         windows = [args.window]
     elif args.regions : 
         windows = [ bed_to_coord(x) for x in args.regions ]
-    elif args.fai :
-        if args.verbose : 
-            print("converting the whole genome using fai",file=sys.stderr)
-        windows = get_windows_from_fai(args.fai,100000)
     else :
-        print("Must provide window, region, or fai",file=sys.stderr)
+        if args.verbose : 
+            print("converting the whole genome",file=sys.stderr)
+        windows = get_windows_from_bam(args.bam,100000)
+        print(windows)
         sys.exit()
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
     # read in fasta
