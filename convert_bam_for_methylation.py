@@ -58,18 +58,6 @@ class Unbuffered(object):
    def __getattr__(self, attr):
        return getattr(self.stream, attr)
 
-def read_tabix(fpath,window) :
-    with pysam.TabixFile(fpath) as tabix :
-        entries = [x for x in tabix.fetch(window)]
-    reads = [MethRead(x) for x in entries]
-    rdict = dict()
-    for meth in reads :
-        qname = meth.qname
-        if qname in rdict.keys() :
-            rdict[qname] = np.append(rdict[qname],meth.callarray,0)
-        else : 
-            rdict[qname] = meth.callarray
-    return rdict
 
 # https://stackoverflow.com/questions/13446445/python-multiprocessing-safely-writing-to-a-file
 def listener(q,inbam,outbam,verbose=False) :
@@ -120,13 +108,26 @@ def get_windows_from_bam(bampath,winsize = 100000) :
             # only fetch from contigs that have mapped reads
             if stat.mapped == 0 :
                 continue
-            print(contigsize)
             numbins = math.ceil(contigsize/winsize)
             wins = [ [x*winsize+1,(x+1)*winsize] for x in range(numbins) ]
             wins[-1][1] = contigsize
             for win in wins :
                 coords.append(make_coord(stat.contig,win[0],win[1]))
     return coords
+
+def read_tabix(fpath,window) :
+    with pysam.TabixFile(fpath) as tabix :
+        entries = [x for x in tabix.fetch(window)]
+    reads = [MethRead(x) for x in entries]
+    rdict = dict()
+    # for split-reads, multiple entries are recorded per read name
+    for meth in reads :
+        qname = meth.qname
+        if qname in rdict.keys() :
+            rdict[qname] = np.append(rdict[qname],meth.callarray,0)
+        else : 
+            rdict[qname] = meth.callarray
+    return rdict
 
 def convert_cpg(bam,cpg,gpc) :
     # only cpg

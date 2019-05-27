@@ -13,7 +13,7 @@ bed=$root/bedz/methyL_2kb_flank.bed
 out=$root/meth_plots/mcf10a_isacHACK_isactry_mm2.bam
 ref=/mithril/Data/NGS/Reference/human38/GRCH38.fa
 
-python convert_bam_for_methylation.py --verbose -t $t \
+python ../convert_bam_for_methylation.py --verbose -t $t \
   -f $ref -b $bam -c $cpg -r $bed --all |\
   samtools sort -o $out
 
