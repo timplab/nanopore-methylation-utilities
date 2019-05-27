@@ -113,15 +113,19 @@ def listener(q,inbam,outbam,verbose=False) :
 
 def get_windows_from_bam(bampath,winsize = 100000) :
     with pysam.AlignmentFile(bampath,"rb") as bam :
-        contigs = bam.references
+        stats = bam.get_index_statistics()
         lengths = bam.lengths
         coords = list()
-        for contig,contigsize in zip(contigs,lengths) : 
-            numbins = math.ceil(contigsize/winsize) 
-            wins = [ [x*winsize+1,(x+1)*winsize] for x in range(numbins) ] 
-            wins[-1][1] = contigsize 
-            for win in wins : 
-                coords.append(make_coord(contig,win[0],win[1]))
+        for stat,contigsize in zip(stats,lengths) :
+            # only fetch from contigs that have mapped reads
+            if stat.mapped == 0 :
+                continue
+            print(contigsize)
+            numbins = math.ceil(contigsize/winsize)
+            wins = [ [x*winsize+1,(x+1)*winsize] for x in range(numbins) ]
+            wins[-1][1] = contigsize
+            for win in wins :
+                coords.append(make_coord(stat.contig,win[0],win[1]))
     return coords
 
 def convert_cpg(bam,cpg,gpc) :
