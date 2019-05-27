@@ -234,8 +234,6 @@ def main() :
         if args.verbose : 
             print("converting the whole genome",file=sys.stderr)
         windows = get_windows_from_bam(args.bam,100000)
-        print(windows)
-        sys.exit()
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
     # read in fasta
     if args.fasta :
