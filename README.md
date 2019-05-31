@@ -25,13 +25,13 @@ converting bam for igv
 ------
 Using the converted bed-style methylation file, the original bam file can be "bisulfite converted _in silico_" for easy visualization on IGV via their bisulfite mode.
 There are three options for specifying the region to convert:
-- `-a,--fai` : for the entire genome, supply the fasta fai index
 - `-r,--regions` : for multiple regions, supply the bed file
 - `-w,--window` : for one region, supply the coordinate (chr:start-end)
+- without either of the above options, all reads will be converted
 
 ```
 ./convert_bam_for_methylation.py -b [path/to/sorted.bam] \
-  -c [path/to/cpg.methylation.bed.gz] -a [path/to/fasta.fai] |\
+  -c [path/to/cpg.methylation.bed.gz] -f [path/to/reference.fasta ] |\
   samtools sort -o [path/to/converted.bam]
 samtools index [path/to/cnverted.bam]
 ```
@@ -40,6 +40,3 @@ samtools index [path/to/cnverted.bam]
 Using `--MD` option during alignment is recommended.
 
 The default output does not have MD tags, and MD tags are necessary for using pysam to get the reference sequence. To get around this, the fasta of reference genome must be supplied via `-f,--fasta`.
-
-This also makes the process (even) slower and memory intensive than using ngmlr reads or aligning minimap2 with the `--MD` option.
-
