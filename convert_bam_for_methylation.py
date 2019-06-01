@@ -137,8 +137,9 @@ def convert_cpg(bam,cpg,gpc) :
 
 def convert_nome(bam,cpg,gpc) :
     # cpg and gpc
-    bam_cpg = change_sequence(bam,cpg,"cpg") 
-    return change_sequence(bam_cpg,gpc,"gpc")
+    changed_cpg,bam_cpg = change_sequence(bam,cpg,"cpg") 
+    changed_gpc,bam_nome = change_sequence(bam_cpg,gpc,"gpc")
+    return (changed_cpg and changed_gpc,bam_nome) # require both cpg and gpc to have valid methylation calls
 
 def reset_bam(bam,genome_seq) :
     try : 
@@ -189,8 +190,10 @@ def change_sequence(bam,calls,mod="cpg") :
         # unmethylated
         meth = calls[np.where(calls[:,1]==0),0]+offset
         seq[np.isin(pos,meth)] = u
+        changed = True
+    else : changed = False # whether valid calls were recorded in this read
     bam.query_sequence = ''.join(seq)
-    return bam
+    return changed,bam
 
 def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verbose,q) :
 #    if verbose : print("reading {} from bam file".format(window),file=sys.stderr)
@@ -221,12 +224,12 @@ def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verb
         try : gpc = gpc_calldict[qname]
         except KeyError : 
             gpc = 0
-        i += 1
         newbam = reset_bam(bam,genome_seq)
-        convertedbam = cfunc(newbam,cpg,gpc)
+        changed,convertedbam = cfunc(newbam,cpg,gpc)
         if not print_nometh :
-            if cpg is 0 or gpc is 0 :
+            if not changed : 
                 continue
+        i += 1
         q.put(convertedbam.to_string())
     if verbose : print("converted {} bam entries in {}".format(i,window),file=sys.stderr)
 
