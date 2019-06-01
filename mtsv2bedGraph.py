@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 import sys
+import gzip
 import csv
 import argparse
 
@@ -104,7 +105,10 @@ def summarizeMeth(args):
         args.window += 2
     # read in data
     if args.input:
-        in_fh = open(args.input)
+        if args.input.strip().split(".")[-1] == "gz" :
+            in_fh = gzip.open(args.input,"rt")
+        else : 
+            in_fh = open(args.input)
     else:
         in_fh = sys.stdin
     csv_reader = csv.DictReader(in_fh,delimiter='\t')
