@@ -26,12 +26,14 @@ def parseArgs() :
             help="number of parallel processes (default : 2 )")
     parser.add_argument('-v','--verbose', action='store_true',default=False,
             help="verbose output")
-    parser.add_argument('-b','--bam',type=os.path.abspath,required=True,
-            help="bam file - sorted and indexed")
     parser.add_argument('-c','--cpg',type=os.path.abspath,required=True,
             help="gpc methylation bed - sorted, bgzipped, and indexed")
     parser.add_argument('-g','--gpc',type=os.path.abspath,required=False,
             default=None,help="gpc methylation bed - sorted, bgzipped, and indexed")
+    parser.add_argument('-b','--bam',type=os.path.abspath,required=True,
+            help="bam file - sorted and indexed")
+    parser.add_argument('-f','--fasta',type=os.path.abspath,required=False,
+            help="fasta file, for minimap2 alignments without --MD option")
     parser.add_argument('-w','--window',type=str,required=False, 
             help="window from index file to extract [chrom:start-end]")
     parser.add_argument('-r','--regions',type=argparse.FileType('r'),required=False, 
