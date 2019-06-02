@@ -183,15 +183,18 @@ def change_sequence(bam,calls,mod="cpg") :
     elif mod == "gpc" :
         seq = np.array(list(bam.query_sequence.replace("GC",dinuc)))
 #    seq[gsites-offset] = g
+    changed = False # whether valid calls were recorded in this read
     if calls is not 0 :
+        calltags = calls[:,1] 
+        sig_fraction = 1 - list(calltags).count(-1)/len(calltags)        # determine fraction of calls that were significant
+        if sig_fraction >= 0.2 : 
+            changed = True # tag if enough fraction of calls were significant
         # methylated
         meth = calls[np.where(calls[:,1]==1),0]+offset
         seq[np.isin(pos,meth)] = m
         # unmethylated
         meth = calls[np.where(calls[:,1]==0),0]+offset
         seq[np.isin(pos,meth)] = u
-        changed = True
-    else : changed = False # whether valid calls were recorded in this read
     bam.query_sequence = ''.join(seq)
     return changed,bam
 
