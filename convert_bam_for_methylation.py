@@ -32,6 +32,8 @@ def parseArgs() :
             help="gpc methylation bed - sorted, bgzipped, and indexed")
     parser.add_argument('-g','--gpc',type=os.path.abspath,required=False,
             default=None,help="gpc methylation bed - sorted, bgzipped, and indexed")
+    parser.add_argument('-f','--fasta',type=os.path.abspath,required=False,
+            default=None,help="fasta file - required for minimap2 alignments without --MD tag")
     parser.add_argument('-w','--window',type=str,required=False, 
             help="window from index file to extract [chrom:start-end]")
     parser.add_argument('-r','--regions',type=argparse.FileType('r'),required=False, 
