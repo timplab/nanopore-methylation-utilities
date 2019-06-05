@@ -26,14 +26,14 @@ def parseArgs() :
             help="number of parallel processes (default : 2 )")
     parser.add_argument('-v','--verbose', action='store_true',default=False,
             help="verbose output")
-    parser.add_argument('-b','--bam',type=os.path.abspath,required=True,
-            help="bam file - sorted and indexed")
     parser.add_argument('-c','--cpg',type=os.path.abspath,required=True,
             help="gpc methylation bed - sorted, bgzipped, and indexed")
     parser.add_argument('-g','--gpc',type=os.path.abspath,required=False,
             default=None,help="gpc methylation bed - sorted, bgzipped, and indexed")
     parser.add_argument('-f','--fasta',type=os.path.abspath,required=False,
             default=None,help="fasta file - required for minimap2 alignments without --MD tag")
+    parser.add_argument('-b','--bam',type=os.path.abspath,required=True,
+            help="bam file - sorted and indexed")
     parser.add_argument('-w','--window',type=str,required=False, 
             help="window from index file to extract [chrom:start-end]")
     parser.add_argument('-r','--regions',type=argparse.FileType('r'),required=False, 
@@ -137,8 +137,9 @@ def convert_cpg(bam,cpg,gpc) :
 
 def convert_nome(bam,cpg,gpc) :
     # cpg and gpc
-    bam_cpg = change_sequence(bam,cpg,"cpg") 
-    return change_sequence(bam_cpg,gpc,"gpc")
+    changed_cpg,bam_cpg = change_sequence(bam,cpg,"cpg") 
+    changed_gpc,bam_nome = change_sequence(bam_cpg,gpc,"gpc")
+    return (changed_cpg and changed_gpc,bam_nome) # require both cpg and gpc to have valid methylation calls
 
 def reset_bam(bam,genome_seq) :
     try : 
@@ -182,7 +183,12 @@ def change_sequence(bam,calls,mod="cpg") :
     elif mod == "gpc" :
         seq = np.array(list(bam.query_sequence.replace("GC",dinuc)))
 #    seq[gsites-offset] = g
+    changed = False # whether valid calls were recorded in this read
     if calls is not 0 :
+        calltags = calls[:,1] 
+        sig_fraction = 1 - list(calltags).count(-1)/len(calltags)        # determine fraction of calls that were significant
+        if sig_fraction >= 0.2 : 
+            changed = True # tag if enough fraction of calls were significant
         # methylated
         meth = calls[np.where(calls[:,1]==1),0]+offset
         seq[np.isin(pos,meth)] = m
@@ -190,7 +196,7 @@ def change_sequence(bam,calls,mod="cpg") :
         meth = calls[np.where(calls[:,1]==0),0]+offset
         seq[np.isin(pos,meth)] = u
     bam.query_sequence = ''.join(seq)
-    return bam
+    return changed,bam
 
 def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verbose,q) :
 #    if verbose : print("reading {} from bam file".format(window),file=sys.stderr)
@@ -221,12 +227,12 @@ def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verb
         try : gpc = gpc_calldict[qname]
         except KeyError : 
             gpc = 0
-        i += 1
         newbam = reset_bam(bam,genome_seq)
-        convertedbam = cfunc(newbam,cpg,gpc)
+        changed,convertedbam = cfunc(newbam,cpg,gpc)
         if not print_nometh :
-            if cpg is 0 or gpc is 0 :
+            if not changed : 
                 continue
+        i += 1
         q.put(convertedbam.to_string())
     if verbose : print("converted {} bam entries in {}".format(i,window),file=sys.stderr)
 
