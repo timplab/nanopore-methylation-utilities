@@ -40,8 +40,10 @@ def parseArgs() :
             help="windows in bed file (default: stdin)")
     parser.add_argument('-o','--out',type=str,required=False,default="stdout",
             help="output bam file (default: stdout)")
-    parser.add_argument('--all',action='store_true',default=False,
-            help="print reads with no methylation data (default False)")
+    parser.add_argument('--remove_poor',action='store_true',default=False,
+            help="remove reads with no/poor methylation data (default False)")
+    parser.add_argument('--debug',action='store_true',default=False,
+            help="debug mode - prints out more messageas")
     # parse args
     args = parser.parse_args()
     args.srcdir=srcdir
@@ -187,7 +189,7 @@ def change_sequence(bam,calls,mod="cpg") :
     if calls is not 0 :
         calltags = calls[:,1] 
         sig_fraction = 1 - list(calltags).count(-1)/len(calltags)        # determine fraction of calls that were significant
-        if sig_fraction >= 0.2 : 
+        if sig_fraction >= 0.5 : 
             changed = True # tag if enough fraction of calls were significant
         # methylated
         meth = calls[np.where(calls[:,1]==1),0]+offset
@@ -198,26 +200,38 @@ def change_sequence(bam,calls,mod="cpg") :
     bam.query_sequence = ''.join(seq)
     return changed,bam
 
-def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verbose,q) :
-#    if verbose : print("reading {} from bam file".format(window),file=sys.stderr)
+def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,remove_poor,verbose,q) :
+    if verbose == "debug" : print("reading {} from bam file".format(window),file=sys.stderr)
     with pysam.AlignmentFile(bampath,"rb") as bam :
         bam_entries = [x for x in bam.fetch(region=window)]
-#    if verbose : print("{} reads in {}".format(len(bam_entries),window),file=sys.stderr)
+    if verbose == "debug" : 
+        print("{} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     if len(bam_entries) == 0 : return
-#    if verbose : print("reading {} from cpg data".format(window),file=sys.stderr)
-    try : cpg_calldict = read_tabix(cpgpath,window)
+    if verbose == "debug" : print("reading {} from cpg data".format(window),file=sys.stderr)
+    try : 
+        cpg_calldict = read_tabix(cpgpath,window)
+        if verbose == "debug" : 
+            print("{} entries in cpg data".format(
+                len(cpg_calldict.keys())),file=sys.stderr)
     except ValueError :
         if verbose :
             print("No CpG methylation in {}, moving on".format(window),file=sys.stderr)
         return
-#    if verbose : print("reading {} from gpc data".format(window),file=sys.stderr)
-    try: gpc_calldict = read_tabix(gpcpath,window)
-    except TypeError : gpc_calldict = cpg_calldict # no gpc provided, repace with cpg for quick fix
+    if verbose == "debug" : 
+        print("reading {} from gpc data".format(window),file=sys.stderr)
+    try: 
+        gpc_calldict = read_tabix(gpcpath,window)
+        if verbose == "debug" : 
+            print("{} entries in cpg data".format(
+                len(gpc_calldict.keys())),file=sys.stderr)
+    except TypeError : 
+        gpc_calldict = cpg_calldict # no gpc provided, repace with cpg for quick fix
     except ValueError :
         if verbose :
             print("No GpC methylation in {}, moving on".format(window),file=sys.stderr)
         return
-#    if verbose : print("converting {} reads in {}".format(len(bam_entries),window),file=sys.stderr)
+    if verbose == "debug" : 
+        print("converting {} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     i = 0
     for bam in bam_entries :
         qname = bam.query_name
@@ -229,15 +243,16 @@ def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,print_nometh,verb
             gpc = 0
         newbam = reset_bam(bam,genome_seq)
         changed,convertedbam = cfunc(newbam,cpg,gpc)
-        if not print_nometh :
-            if not changed : 
+        if not changed :
+            if remove_poor :
                 continue
         i += 1
         q.put(convertedbam.to_string())
     if verbose : print("converted {} bam entries in {}".format(i,window),file=sys.stderr)
-
 def main() :
     args=parseArgs()
+    # debug mode
+    if args.debug : args.verbose = "debug"
     sys.stderr = Unbuffered(sys.stderr)
     if args.window : 
         windows = [args.window]
@@ -269,11 +284,11 @@ def main() :
             seq = fasta.fetch(reference=chrom).upper()
             jobs.append(pool.apply_async(convertBam,
                 args = (args.bam,seq,converter,args.cpg,args.gpc,
-                    win,args.all,args.verbose,q)))
+                    win,args.remove_poor,args.verbose,q)))
     else : 
         jobs = [ pool.apply_async(convertBam,
             args = (args.bam,0,converter,args.cpg,args.gpc,
-                win,args.all,args.verbose,q))
+                win,args.remove_poor,args.verbose,q))
             for win in windows ]
     output = [ p.get() for p in jobs ]
     # done
