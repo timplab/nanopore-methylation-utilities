@@ -36,6 +36,8 @@ def parseArgs() :
             help="windows in bed file (default: stdin)")
     parser.add_argument('-p','--pre',type=str,required=False,
             default = None,help="output haplotyped bed prefix (default input bam - extension)")
+    parser.add_argument('--random',action='store_true',default = False,
+            help = "simulate random assignments")
     # parse args
     args = parser.parse_args()
     if not args.pre :
@@ -123,7 +125,7 @@ def read_tabix(fpath,window) :
             rdict[qname] = [entry]
     return rdict
 
-def split_bed_haplotypes(bampath,bedpath,coord,verbose,q) :
+def split_bed_haplotypes(bampath,bedpath,coord,assigner,verbose,q) :
     with pysam.AlignmentFile(bampath,'rb') as bam :
         reads = [x for x in bam.fetch(region=coord)] 
     hap1_qnames = list()
@@ -133,7 +135,7 @@ def split_bed_haplotypes(bampath,bedpath,coord,verbose,q) :
         taglabels = [ x[0] for x in tags ]
         if "HP" not in taglabels : continue
         qname = read.query_name
-        hap = tags[taglabels.index("HP")][1]
+        hap = assigner(tags[taglabels.index("HP")][1])
         if hap == 1 :
             hap1_qnames.append(qname)
         elif hap == 2 :
@@ -166,6 +168,11 @@ def main() :
             print("extracting all reads in the bam file",file=sys.stderr)
         windows = get_windows_from_bam(args.bam,100000)
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
+    # assignment function - real vs random
+    if not args.random :
+        def assigner(hap) : return hap
+    elif args.random :
+        def assigner(hap) : return np.random.binomial(1,.5) + 1 # bernoulli trial with p = 0.5
     # initialize mp
     manager = mp.Manager()
     q = manager.Queue()
@@ -175,7 +182,7 @@ def main() :
     watcher = pool.apply_async(listener,(q,args.pre,args.verbose))
     # start processing
     jobs = [ pool.apply_async(split_bed_haplotypes,
-        args = (args.bam,args.bed,win,args.verbose,q))
+        args = (args.bam,args.bed,win,assigner,args.verbose,q))
         for win in windows ]
     output = [ p.get() for p in jobs ]
     # done
