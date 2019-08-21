@@ -108,8 +108,9 @@ def bed_to_coord(bedentry) :
     return fields[0]+":"+start+"-"+fields[2]
 
 def coord_to_bed(coord) :
-    fields=re.split(":|-",coord)
-    return fields[0],int(fields[1]),int(fields[2])
+    fields = coord.split(":")
+    numbers = fields[1].split("-")
+    return fields[0],int(numbers[0]),int(numbers[1])
 
 
 def read_bam(fpath,window) :
