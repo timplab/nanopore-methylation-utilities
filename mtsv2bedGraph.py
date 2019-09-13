@@ -3,13 +3,14 @@ import sys
 import gzip
 import csv
 import argparse
+import re
 
 def parseArgs():
     parser = argparse.ArgumentParser( description='Generate methylation bedGraph file')
     parser.add_argument('-c', '--call-threshold', type=float, required=False, default=2.5,
             help="absolute value of threshold for methylation call (default : 2.5)")
     parser.add_argument('-i', '--input', type=str, required=False,help="input methylation tsv file (default stdin)")
-    parser.add_argument('-m', '--mod',type=str,required=False,default='cpg',help="modification motif; one of cpg,gpc,dam")
+    parser.add_argument('-m', '--mod',type=str,required=False,default='cpg',help="modification motif; one of cpg,gpc,dam,cpggpc")
     parser.add_argument('-e', '--exclude',type=str,required=False,help="motif to exclude from reporting")
     parser.add_argument('-w', '--window',type=int,required=False,default=2,
             help="number of nucleotides to report on either side of called nucleotide")
@@ -30,7 +31,6 @@ class readQuery:
         self.nome = nome
         self.qname = record['read_name']
         self.rname = record['chromosome']
-        self.strand = record['strand']
         self.start = int(record['start']) + self.offset
         self.end = self.start + 1
         self.dist=[]
@@ -78,7 +78,7 @@ class readQuery:
         for ind,call in zip(self.dist,self.call):
             summary=summary+"{}{}".format(ind,call)
         return summary
-    def printRead(self):
+    def printRead(self,extra=""):
         if len(self.call) == 0 : return # after filtering GCG there is no data in this read
         # if GCG is first motif, adjust start to make first index 0
         if self.dist[0] != 0 :
@@ -90,7 +90,7 @@ class readQuery:
             self.qname,
             self.summarizeCall(),
             catList(self.ratio,","),
-            catList(self.seq,",")]))
+            catList(self.seq,",")])+extra)
 
 def summarizeMeth(args):
     # motif and offset based on modification
@@ -112,29 +112,56 @@ def summarizeMeth(args):
     else:
         in_fh = sys.stdin
     csv_reader = csv.DictReader(in_fh,delimiter='\t')
-    for record in csv_reader:
-        # skip queries that have an undesired motif in the call group
-        if args.exclude:
-            if args.exclude in record['sequence'] :
-                continue
-        # update query
-        try :
-            if ((record['read_name'] != read.qname) or
-                    (record['chromosome'] != read.rname) or
-                    (int(record['start']) < read.end)):
-                read.printRead()
+    if args.mod != "cpggpc" :
+        for record in csv_reader:
+            # skip queries that have an undesired motif in the call group
+            if args.exclude:
+                if args.exclude in record['sequence'] :
+                    continue
+            # update query
+            try :
+                if ((record['read_name'] != read.qname) or
+                        (record['chromosome'] != read.rname) or
+                        (int(record['start']) < read.end)):
+                    read.printRead()
+                    read = readQuery(record,args.call_threshold,
+                            motif,args.offset,args.window,args.nome)
+                else :
+                    read.update(record)
+            except NameError : # has not been initialized
                 read = readQuery(record,args.call_threshold,
                         motif,args.offset,args.window,args.nome)
-            else :
-                read.update(record)
-        except NameError : # has not been initialized
-            read = readQuery(record,args.call_threshold,
-                    motif,args.offset,args.window,args.nome)
-        except ValueError : # header or otherwise somehow faulty
-            continue
-    # finishing up - print the unprinted read
-    if read.qname : 
-        read.printRead()
+            except ValueError : # header or otherwise somehow faulty
+                continue
+        # finishing up - print the unprinted read
+        if read.qname : 
+            read.printRead()
+    else :
+        read = dict()
+        for record in csv_reader :
+            motif = record['motif']
+            record['sequence'] = re.sub("M","C",record['sequence'])
+            # update query
+            try :
+                if ((record['read_name'] != read[motif].qname) or
+                        (record['chromosome'] != read[motif].rname) or
+                        (int(record['start']) < read[motif].end)):
+                    for key in read.keys() :
+                        read[key].printRead("\t"+key)
+                    read = dict()
+                    read[motif] = readQuery(record,args.call_threshold,
+                            motif,args.offset,args.window,args.nome)
+                else :
+                    read[motif].update(record)
+            except KeyError : # has not been initialized
+                read[motif] = readQuery(record,args.call_threshold,
+                        motif,args.offset,args.window,args.nome)
+            except ValueError : # header or otherwise somehow faulty
+                continue
+        # finishing up - print the unprinted read
+        for key in read.keys() :
+            read[key].printRead("\t"+key)
+
     in_fh.close()
 
 if __name__=="__main__":
