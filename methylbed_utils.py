@@ -19,6 +19,10 @@ class MethRead :
         self.rlen=self.end-self.start
         self.qname=self.fields[3]
         self.methstring=self.fields[4]
+        if self.fields[5] == "+" or self.fields[5] == "-" :
+            self.strand = self.fields[5]
+            self.fields[5] = self.fields[6]
+            self.fields[6] = self.fields[7]
         self.ratios=self.fields[5].strip().split(",")
         self.seqs=self.fields[6].strip().split(",")
         self.calldict=self.parseMeth()
