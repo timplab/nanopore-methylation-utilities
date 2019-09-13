@@ -170,7 +170,10 @@ def main() :
         if args.verbose : 
             print("extracting all reads in the bam file",file=sys.stderr)
         windows = get_windows_from_bam(args.bam,100000)
-    if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
+    if args.verbose : 
+        print("{} regions to parse".format(len(windows)),file=sys.stderr)
+        if args.random :
+            print("separating reads randomly",file = sys.stderr)
     # initialize mp
     manager = mp.Manager()
     q = manager.Queue()

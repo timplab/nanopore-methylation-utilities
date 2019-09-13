@@ -52,46 +52,6 @@ class MethRead :
         callarray=np.array([(x,calldict[x].call) for x in sorted(calldict.keys())])
         return callarray
 
-# sniffles entry
-class SnifflesEntry :
-    def __init__(self,line) :
-        self.line=line.strip()
-        self.fields=self.line.split("\t")
-        (self.chrom,self.pos,self.id,self.ref,
-                self.type,self.qual,self.filter,self.infostring,
-                self.format,self.genotype) = self.fields[0:10]
-        self.pos = int(self.pos)
-        self.type = self.type.strip("<").strip(">")
-        self.activate()
-    def activate(self) :
-        self.parseinfo()
-        self.checkcontig()
-        self.parsegenotype()
-    def checkcontig(self) :
-        if "chr" not in self.chrom :
-            self.chrom = "chr" + self.chrom
-            self.info["CHR2"] = "chr" + self.info["CHR2"]
-    def parseinfo(self) :
-        self.infofields = [ x.split("=") for x in self.infostring.strip().split(";")]
-        self.info = dict()
-        self.info["CONFIDENCE"] = self.infofields[0][0]
-        for entry in self.infofields[1:] :
-            self.info[entry[0]] = entry[1]
-        self.info["END"] = int(self.info["END"])
-        self.info["RE"] = int(self.info["RE"])
-        self.info["SVLEN"] = int(self.info["SVLEN"])
-        self.rnames = self.info["RNAMES"].split(',')
-    def parsegenotype(self) :
-        self.allele= self.genotype.split(":")[0]
-        if self.allele== "0/1" :
-            self.zygosity = "het"
-        elif self.allele == "1/1" :
-            self.zygosity = "hom"
-        else : self.zygosity = "none"
-        self.num_against = int(self.genotype.split(":")[1])
-        self.num_for = int(self.genotype.split(":")[2])
-        self.coverage = self.num_against+self.num_for
-
 # functions 
 def tabix(fpath,window) :
     with pysam.TabixFile(fpath,'r') as tabix :
