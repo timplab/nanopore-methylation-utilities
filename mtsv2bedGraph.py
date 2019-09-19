@@ -4,13 +4,17 @@ import gzip
 import csv
 import argparse
 import re
+import pysam
 
 def parseArgs():
     parser = argparse.ArgumentParser( description='Generate methylation bedGraph file')
+    parser.add_argument('-v', '--verbose', action="store_true",required=False, default = False,
+            help="verbose output")
     parser.add_argument('-c', '--call-threshold', type=float, required=False, default=2.5,
             help="absolute value of threshold for methylation call (default : 2.5)")
     parser.add_argument('-i', '--input', type=str, required=False,help="input methylation tsv file (default stdin)")
-    parser.add_argument('-m', '--mod',type=str,required=False,default='cpg',help="modification motif; one of cpg,gpc,dam,cpggpc")
+    parser.add_argument('-q', '--mod',type=str,required=False,default='cpg',help="modification motif; one of cpg,gpc,dam,cpggpc")
+    parser.add_argument('-g','--genome',type=str,required=True,help="Reference genome fasta")
     parser.add_argument('-e', '--exclude',type=str,required=False,help="motif to exclude from reporting")
     parser.add_argument('-w', '--window',type=int,required=False,default=2,
             help="number of nucleotides to report on either side of called nucleotide")
@@ -37,27 +41,28 @@ class readQuery:
         self.seq=[]
         self.ratio=[]
         self.call=[]
-        self.update(record)
 
-    def update(self,record):
+    def update(self,record,seq_dict):
         llr=float(record['log_lik_ratio'])
         call=self.call_methylation(llr) # call methylation
-        start = int(record['start']) + self.offset
-        sequence = record['sequence']
+#        start = int(record['start']) + self.offset
+#        sequence = record['sequence']
+        start = int(record['start'])-self.win_size
+        sequence = seq_dict[self.rname][start:int(record['end'])+2+self.win_size].upper()
         pos = sequence.find(self.motif)
         pos_list = []
         seq_list = []
         # read groups
         while pos != -1 :
             seq = sequence[pos-self.win_size:pos+self.win_size+1]
-            if not self.nome or "GCG" not in seq:
+            if not self.nome or ( "GCG" not in seq ):
                 pos_list.append(pos)
                 self.ratio.append(llr)
                 self.call.append(call)
                 seq_list.append(seq)
             pos = sequence.find(self.motif,pos+1)
         if len(pos_list) == 0 : return
-        coord_list = [ x+start-pos_list[0] for x in pos_list ]
+        coord_list = [ x+start for x in pos_list ]
         # get distance (CIGAR style)
         dist_list = [ x-y for x,y in 
                 zip(coord_list,[self.end-1]+coord_list) ]
@@ -93,6 +98,11 @@ class readQuery:
             catList(self.seq,",")])+extra)
 
 def summarizeMeth(args):
+    # first load ref into memory to speed up lookup
+    if args.verbose : print("loading reference sequence",file = sys.stderr)
+    fa = pysam.FastaFile(args.genome)
+    contigs = fa.references
+    seq_dict = { x:fa.fetch(x) for x in contigs }
     # motif and offset based on modification
     if args.mod=="cpg" :
         motif="CG"
@@ -112,6 +122,7 @@ def summarizeMeth(args):
     else:
         in_fh = sys.stdin
     csv_reader = csv.DictReader(in_fh,delimiter='\t')
+    if args.verbose : print("processing calls",file = sys.stderr)
     if args.mod != "cpggpc" :
         for record in csv_reader:
             # skip queries that have an undesired motif in the call group
@@ -125,14 +136,13 @@ def summarizeMeth(args):
                         (int(record['start']) < read.end)):
                     read.printRead()
                     read = readQuery(record,args.call_threshold,
-                            motif,args.offset,args.window,args.nome)
-                else :
-                    read.update(record)
+                            motif,args.offset,args.window,args.nome) 
             except NameError : # has not been initialized
                 read = readQuery(record,args.call_threshold,
                         motif,args.offset,args.window,args.nome)
             except ValueError : # header or otherwise somehow faulty
                 continue
+            read.update(record,seq_dict)
         # finishing up - print the unprinted read
         if read.qname : 
             read.printRead()
@@ -151,13 +161,12 @@ def summarizeMeth(args):
                     read = dict()
                     read[motif] = readQuery(record,args.call_threshold,
                             motif,args.offset,args.window,args.nome)
-                else :
-                    read[motif].update(record)
             except KeyError : # has not been initialized
                 read[motif] = readQuery(record,args.call_threshold,
                         motif,args.offset,args.window,args.nome)
             except ValueError : # header or otherwise somehow faulty
                 continue
+            read[motif].update(record,seq_dict)
         # finishing up - print the unprinted read
         for key in read.keys() :
             read[key].printRead("\t"+key)
