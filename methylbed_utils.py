@@ -55,6 +55,24 @@ class MethRead :
     def getArray(self,calldict) :
         callarray=np.array([(x,calldict[x].call) for x in sorted(calldict.keys())])
         return callarray
+    def redo_mcall(self,upper,lower) :
+        for i,ratio in enumerate(self.ratios) :
+            ratio = float(ratio)
+            if ratio > upper :
+                call = 1
+            elif ratio < lower :
+                call = 0
+            else :
+                call = -1
+            self.callarray[i,1] = call
+        new_dict = dict()
+        for i,key in enumerate(sorted(self.calldict.keys()) ):
+            new_dict[key] = methylCall(
+                    self.calldict[key].pos,
+                    self.callarray[i,1],
+                    float(self.ratios[i]),
+                    self.seqs[i])
+        self.calldict = new_dict
 
 # functions 
 def tabix(fpath,window) :

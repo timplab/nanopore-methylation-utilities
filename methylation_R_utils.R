@@ -36,7 +36,7 @@ tabix <- function(querypath,dbpath,col_names=NULL,verbose=TRUE){
 ##            strand(dbpath) = "*"
 ##            regions = gsub(":.,","",toString(dbpath))
 ##            command = paste("tabix",querypath,regions)
-            raw.list = scanTabix(querypath,dbpath)
+            raw.list = scanTabix(querypath,param=dbpath)
             region.raw = do.call(c,raw.list)
         } else {
             if (verbose) cat(paste0("reading regions defined by ",
@@ -107,9 +107,10 @@ tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),verbose=TRUE){
         }
     }
     if (length(by)>1){
-        lapply(by,function(x){parsembed(out.tb,x,verbose)})
-    }else{ parsembed(out.tb,by) }
-
+        out <- lapply(by,function(x){parsembed(out.tb,x,verbose)})
+        names(out) = by
+    }else{ out <- parsembed(out.tb,by) }
+    return(out)
 }
     
 tabix_mfreq <- function(querypath,dbpath=NULL,cov=2,trinuc_exclude="GCG",verbose=TRUE){
