@@ -93,12 +93,12 @@ tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),verbose=TRUE){
     mbedcnames=c("chrom","start","end","readname","mstring","scores","context")
     if (!is.null(dbpath)) {
         region.tb=tabix(querypath,dbpath,mbedcnames,verbose=verbose)
-        if (verbose) cat("removing redundant loci\n")
-        out.tb=unique(region.tb)
     }else{
         if (verbose) cat(paste0("reading the entire data of ",querypath,"\n"))
-        out.tb=read_tsv(querypath,col_names=mfreqcnames)
+        region.tb=read_tsv(querypath,col_names=mbedcnames)
     }
+    if (verbose) cat("removing redundant loci\n")
+    out.tb=unique(region.tb)
     parsembed=function(mbed.tb,what,verbose=TRUE){
         if (what == "call"){
             mbedByCall(mbed.tb,verbose=verbose)
@@ -107,9 +107,11 @@ tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),verbose=TRUE){
         }
     }
     if (length(by)>1){
-        lapply(by,function(x){parsembed(out.tb,x,verbose)})
-    }else{ parsembed(out.tb,by) }
-
+        out = lapply(by,function(x){parsembed(out.tb,x,verbose)
+    })
+        names(out) = by
+    }else{ out = parsembed(out.tb,by) }
+    return(out)
 }
     
 tabix_mfreq <- function(querypath,dbpath=NULL,cov=2,trinuc_exclude="GCG",verbose=TRUE){

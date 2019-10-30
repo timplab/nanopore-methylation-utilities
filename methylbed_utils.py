@@ -6,6 +6,7 @@ from collections import namedtuple
 import re
 import pysam
 import numpy as np
+import pandas as pd
 
 # for read from a methylation bed file
 methylCall = namedtuple('methylCall', ['pos','call','ratio','seq'])
@@ -56,12 +57,7 @@ class MethRead :
         callarray=np.array([(x,calldict[x].call) for x in sorted(calldict.keys())])
         return callarray
 
-# functions 
-def tabix(fpath,window) :
-    with pysam.TabixFile(fpath,'r') as tabix :
-        entries = [ x for x in tabix.fetch(window)]
-    return entries
-    
+# functions
 def make_coord(chrom,start,end) :
     if start < 1 : start = 1
     return chrom+":"+str(start)+"-"+str(end)
@@ -76,6 +72,26 @@ def coord_to_bed(coord) :
     numbers = fields[1].split("-")
     return fields[0],int(numbers[0]),int(numbers[1])
 
+# tabix functions 
+def tabix(fpath,window) :
+    with pysam.TabixFile(fpath,'r') as tabix :
+        entries = [ x for x in tabix.fetch(window)]
+    return entries
+
+def tabix_mbed(fpath,regs_df) :
+    # fpath is methylation bed file (gzipped and tabix indexed)
+    # regs_df must be a pandas data frame with columns : chrom,start,end
+    out_list = list()
+    for idx,row in regs_df.iterrows() :
+        coord = make_coord(row[0],row[1],row[2])
+        try :
+            raw_list = tabix(fpath,coord)
+            out_list.append([MethRead(x) for x in raw_list])
+        except ValueError : 
+            out_list.append([])
+    return out_list
+
+    
 
 def read_bam(fpath,window) :
     with pysam.AlignmentFile(fpath,'rb') as bam :
@@ -87,4 +103,5 @@ def read_bam(fpath,window) :
         except :
             bamdict[bam.query_name] = [bam]
     return bamdict
+
 
