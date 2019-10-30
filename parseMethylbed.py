@@ -29,6 +29,10 @@ def parseArgs() :
     # parser for frequency
     parser_freq = subparsers.add_parser('frequency',parents=[parent_parser],
             help = 'get frequency')
+    parser_freq.add_argument('--upper',type=float,required=False,
+            help = 'upper threshold for methylatin')
+    parser_freq.add_argument('--lower',type=float,required=False,
+            help = 'lower threshold for methylatin')
     parser_freq.set_defaults(func=getFreq)
     # parser for readlevel methylation
     parser_readlevel = subparsers.add_parser('readlevel',parents=[parent_parser],
@@ -102,13 +106,22 @@ def getFreq(args,in_fh):
     if args.verbose : print("getting frequency",file=sys.stderr)
     sites=dict()
     n = 0
+    if args.upper or args.lower :
+        def read_methread(line):
+            read=MethRead(line)
+            read.redo_mcall(args.upper,args.lower)
+            return read
+    else :
+        def read_methread(line):
+            read=MethRead(line)
+            return read
     for line in in_fh:
         try : 
             line = line.decode('ascii')
         except AttributeError :
             pass
         n += 1
-        read=MethRead(line)
+        read = read_methread(line)
 #        # debug
 #        print(line,file=sys.stdout)
 #        print(read.ratios)

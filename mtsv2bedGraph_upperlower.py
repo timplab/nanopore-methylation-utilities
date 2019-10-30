@@ -20,22 +20,24 @@ def parseArgs():
             help="number of nucleotides to report on either side of called nucleotide")
     parser.add_argument('--nome',action="store_true",required=False,default=False,
             help="nanoNOMe - remove calls at GCG motifs")
-    parser.add_argument('--offset',type=int,required=False,default=0,
-            help="nanopolish coordinate offset (1-based)")
+    parser.add_argument('--upper',type=int,required=False,
+            help="upper threshold - overrides -c")
+    parser.add_argument('--lower',type=int,required=False,
+            help="lower threshold - overrides -c")
     args = parser.parse_args()
     assert(args.call_threshold is not None)
     return args
 
 class readQuery:
-    def __init__(self,record,thr,motif,offset,win_size,nome):
-        self.thr = thr
+    def __init__(self,record,upper,lower,motif,win_size,nome):
+        self.upper = upper
+        self.lower = lower 
         self.motif = motif
-        self.offset = offset
         self.win_size = win_size
         self.nome = nome
         self.qname = record['read_name']
         self.rname = record['chromosome']
-        self.start = int(record['start']) + self.offset
+        self.start = int(record['start'])
         self.end = self.start + 1
         self.dist=[]
         self.seq=[]
@@ -45,8 +47,6 @@ class readQuery:
     def update(self,record,seq_dict):
         llr=float(record['log_lik_ratio'])
         call=self.call_methylation(llr) # call methylation
-#        start = int(record['start']) + self.offset
-#        sequence = record['sequence']
         start = int(record['start'])-self.win_size
         sequence = seq_dict[self.rname][start:int(record['end'])+2+self.win_size].upper()
         pos = sequence.find(self.motif)
@@ -71,12 +71,12 @@ class readQuery:
         self.seq = self.seq + seq_list
         self.dist = self.dist + dist_list
     def call_methylation(self,llr):
-        if abs(llr) < self.thr :
-            call="x"
-        elif llr > 0 :
-            call="m"
-        else : 
+        if llr < self.lower :
             call="u"
+        elif llr > self.upper :
+            call="m"
+        else :
+            call="x"
         return call
     def summarizeCall(self):
         summary=""
@@ -107,12 +107,15 @@ def summarizeMeth(args):
     if args.mod=="cpg" :
         motif="CG"
     elif args.mod=="gpc" :
-        args.offset += 1  # coordinate of C is +1 since G comes before C
         motif="GC"
     elif args.mod=="dam" :
-        args.offset += 1  # coordinate of C is +1 since G comes before C
         motif="GATC"
         args.window += 2
+    # thresholds
+    if not args.upper :
+        args.upper = args.call_threshold
+    if not args.lower :
+        args.lower = -args.call_threshold
     # read in data
     if args.input:
         if args.input.strip().split(".")[-1] == "gz" :
@@ -135,11 +138,11 @@ def summarizeMeth(args):
                         (record['chromosome'] != read.rname) or
                         (int(record['start']) < read.end)):
                     read.printRead()
-                    read = readQuery(record,args.call_threshold,
-                            motif,args.offset,args.window,args.nome) 
+                    read = readQuery(record,args.upper,args.lower,
+                            motif,args.window,args.nome) 
             except NameError : # has not been initialized
-                read = readQuery(record,args.call_threshold,
-                        motif,args.offset,args.window,args.nome)
+                read = readQuery(record,args.upper,args.lower,
+                        motif,args.window,args.nome)
             except ValueError : # header or otherwise somehow faulty
                 continue
             read.update(record,seq_dict)
@@ -159,11 +162,11 @@ def summarizeMeth(args):
                     for key in read.keys() :
                         read[key].printRead("\t"+key)
                     read = dict()
-                    read[motif] = readQuery(record,args.call_threshold,
-                            motif,args.offset,args.window,args.nome)
+                    read[motif] = readQuery(record,args.upper,args.lower,
+                            motif,args.window,args.nome)
             except KeyError : # has not been initialized
-                read[motif] = readQuery(record,args.call_threshold,
-                        motif,args.offset,args.window,args.nome)
+                read[motif] = readQuery(record,args.upper,args.lower,
+                        motif,args.window,args.nome)
             except ValueError : # header or otherwise somehow faulty
                 continue
             read[motif].update(record,seq_dict)
