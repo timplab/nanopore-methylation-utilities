@@ -147,6 +147,7 @@ def summarizeMeth(args):
         if read.qname : 
             read.printRead()
     else :
+        # if motif is cpggpc, the output is split between cpg calls and gpc calls
         read = dict()
         for record in csv_reader :
             motif = record['motif']
