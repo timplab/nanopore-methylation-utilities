@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 import sys
 import gzip
 import csv
@@ -150,6 +150,7 @@ def summarizeMeth(args):
         read = dict()
         for record in csv_reader :
             motif = record['motif']
+            if motif == "motif" : continue # skip extra headers
             record['sequence'] = re.sub("M","C",record['sequence'])
             # update query
             try :
