@@ -150,7 +150,7 @@ def summarizeMeth(args):
         read = dict()
         for record in csv_reader :
             motif = record['motif']
-            if motif == "motif" : continue # skip extra headers
+            if record['read_name'] == "read_name" : continue # skip extra headers
             record['sequence'] = re.sub("M","C",record['sequence'])
             # update query
             try :
