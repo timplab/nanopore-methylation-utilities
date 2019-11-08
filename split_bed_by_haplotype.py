@@ -116,7 +116,7 @@ def read_tabix(fpath,window) :
     with pysam.TabixFile(fpath) as tabix :
         entries = [ x for x in tabix.fetch(window)]
     rdict = dict()
-    # for split-reads, multiple entries are recorded per read name
+    # for split-reads and cpggpc calls, multiple entries are recorded per read name
     for entry in entries:
         qname = entry.split("\t")[3]
         if qname in rdict.keys() :
