@@ -10,8 +10,8 @@ def parseArgs():
     parser = argparse.ArgumentParser( description='Generate methylation bedGraph file')
     parser.add_argument('-v', '--verbose', action="store_true",required=False, default = False,
             help="verbose output")
-    parser.add_argument('-c', '--call-threshold', type=float, required=False, default=2.5,
-            help="absolute value of threshold for methylation call (default : 2.5)")
+    parser.add_argument('-c', '--call-threshold', type=float, required=False, default=1.5,
+            help="absolute value of threshold for methylation call (default : 1.5)")
     parser.add_argument('-i', '--input', type=str, required=False,help="input methylation tsv file (default stdin)")
     parser.add_argument('-q', '--mod',type=str,required=False,default='cpg',help="modification motif; one of cpg,gpc,dam,cpggpc")
     parser.add_argument('-g','--genome',type=str,required=True,help="Reference genome fasta")
@@ -89,6 +89,10 @@ class readQuery:
         if self.dist[0] != 0 :
             self.start += self.dist[0]
             self.dist[0] = 0
+        # when motif is GC, positions need to shift + one
+        if self.motif == "GC" :
+            self.start += 1
+            self.end += 1 
         def catList(strlist,delim=""):
             return delim.join([str(x) for x in strlist])
         print("\t".join([self.rname,str(self.start),str(self.end),
