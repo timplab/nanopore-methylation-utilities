@@ -29,9 +29,9 @@ def parseArgs() :
     # parser for frequency
     parser_freq = subparsers.add_parser('frequency',parents=[parent_parser],
             help = 'get frequency')
-    parser_freq.add_argument('--upper',type=float,required=False,
+    parser_freq.add_argument('-u','--upper',type=float,required=False,
             help = 'upper threshold for methylatin')
-    parser_freq.add_argument('--lower',type=float,required=False,
+    parser_freq.add_argument('-l','--lower',type=float,required=False,
             help = 'lower threshold for methylatin')
     parser_freq.set_defaults(func=getFreq)
     # parser for readlevel methylation
