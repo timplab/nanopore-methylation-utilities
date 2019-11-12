@@ -28,7 +28,7 @@ def parseArgs() :
             help="methylation motif (one of 'cpg' and 'gpc', default cpg)",default="cpg")
     # parser for frequency
     parser_freq = subparsers.add_parser('frequency',parents=[parent_parser],
-            help = 'get frequency')
+            help = 'get frequency - mbed *must* be sorted')
     parser_freq.add_argument('-u','--upper',type=float,required=False,
             help = 'upper threshold for methylatin')
     parser_freq.add_argument('-l','--lower',type=float,required=False,
