@@ -26,6 +26,19 @@ def parseArgs():
     assert(args.call_threshold is not None)
     return args
 
+# https://stackoverflow.com/questions/107705/disable-output-buffering
+class Unbuffered(object):
+   def __init__(self, stream):
+       self.stream = stream
+   def write(self, data):
+       self.stream.write(data)
+       self.stream.flush()
+   def writelines(self, datas):
+       self.stream.writelines(datas)
+       self.stream.flush()
+   def __getattr__(self, attr):
+       return getattr(self.stream, attr)
+
 class readQuery:
     def __init__(self,record,thr,motif,offset,win_size,nome):
         self.thr = thr
@@ -129,6 +142,10 @@ def summarizeMeth(args):
     if args.verbose : print("processing calls",file = sys.stderr)
     if args.mod != "cpggpc" :
         for record in csv_reader:
+            if record['chromosome'] not in contigs :
+                if args.verbose : 
+                    print("{} not in reference, skipping.".format(record['chromosome']),file = sys.stderr)
+                continue
             # skip queries that have an undesired motif in the call group
             if args.exclude:
                 if args.exclude in record['sequence'] :
