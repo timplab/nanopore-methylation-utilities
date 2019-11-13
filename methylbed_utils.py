@@ -99,17 +99,26 @@ def tabix(fpath,window) :
 def tabix_mbed(fpath,regs_df) :
     # fpath is methylation bed file (gzipped and tabix indexed)
     # regs_df must be a pandas data frame with columns : chrom,start,end
-    out_list = list()
-    for idx,row in regs_df.iterrows() :
+    # if only one reg : 
+    if not isinstance(regs_df, pd.DataFrame) :
+        row = regs_df
         coord = make_coord(row[0],row[1],row[2])
         try :
             raw_list = tabix(fpath,coord)
-            out_list.append([MethRead(x) for x in raw_list])
+            out_list = [MethRead(x) for x in raw_list]
         except ValueError : 
-            out_list.append([])
+            out_list = list()
+    else  :
+        # if multiple regs, each element of the list is the list of reads in a given reg
+        out_list = list()
+        for idx,row in regs_df.iterrows() :
+            coord = make_coord(row[0],row[1],row[2])
+            try :
+                raw_list = tabix(fpath,coord)
+                out_list.append([MethRead(x) for x in raw_list])
+            except ValueError : 
+                out_list.append([])
     return out_list
-
-    
 
 def read_bam(fpath,window) :
     with pysam.AlignmentFile(fpath,'rb') as bam :
