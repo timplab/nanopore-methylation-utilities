@@ -154,6 +154,10 @@ def summarizeMeth(args):
         # if motif is cpggpc, the output is split between cpg calls and gpc calls
         read = dict()
         for record in csv_reader :
+            if record['chromosome'] not in contigs :
+                if args.verbose : 
+                    print("{} not in reference, skipping.".format(record['chromosome']),file = sys.stderr)
+                continue
             motif = record['motif']
             if record['read_name'] == "read_name" : continue # skip extra headers
             record['sequence'] = re.sub("M","C",record['sequence'])
