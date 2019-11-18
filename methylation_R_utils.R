@@ -54,11 +54,9 @@ tabix <- function(querypath,dbpath,col_names=NULL,verbose=TRUE){
             distinct()
 }
 
-mbedByCall <- function(mbed,smooth=FALSE,ns=10,h=50,verbose=T){
+mbedByCall <- function(mbed,verbose=T){
     if (verbose) cat("parsing data into single call per line\n")
-    corenum=(detectCores()-2)/2
-    if (verbose) cat(paste0("using ",corenum," cores\n"))
-    out.list=mclapply(mc.cores=corenum,seq(dim(mbed)[1]),function(i){
+    out.list=lapply(seq(dim(mbed)[1]),function(i){
         #if (verbose) cat(paste0(i,"\n"))
         read=mbed[i,]
         mstring=read$mstring    
@@ -74,23 +72,26 @@ mbedByCall <- function(mbed,smooth=FALSE,ns=10,h=50,verbose=T){
                )
         out$mcall[which(out$mcall=="m")]=1
         out$mcall[which(out$mcall=="u")]=0
+        out$mcall[which(out$mcall=="x")]=NA
         out$mcall=as.numeric(out$mcall)
         if ( dim(out)[1] == 0 ) return(out)
-        if ( smooth == TRUE ){
-            require(locfit)
-            smooth = locfit(mcall ~ lp(start, nn = ns, h = h), data = out, maxk =10000)
-            pp = preplot(smooth,where="data",band="local")
-            out$smooth = pp$trans(pp$fit)
-        }
         #if (verbose) cat(paste0("done with ",i,"\n"))
         out
     })
     calls = do.call(rbind,out.list)
     calls
 }
+
+redo_mcall <- function(calls,thr) {
+    mcall <- rep(NA,nrow(calls))
+    mcall[calls$score > thr] <- 1
+    mcall[calls$score < -thr] <- 0
+    calls$mcall <- mcall
+    calls
+}
     
-tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),verbose=TRUE){
-    mbedcnames=c("chrom","start","end","readname","mstring","scores","context")
+tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),extcol = NULL,verbose=TRUE){
+    mbedcnames=c("chrom","start","end","readname","mstring","scores","context",extcol)
     if (!is.null(dbpath)) {
         region.tb=tabix(querypath,dbpath,mbedcnames,verbose=verbose)
     }else{
@@ -107,7 +108,9 @@ tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),verbose=TRUE){
         }
     }
     if (length(by)>1){
-        out <- lapply(by,function(x){parsembed(out.tb,x,verbose)})
+        out <- lapply(by,function(x){
+          parsembed(out.tb,x,verbose)
+        })
         names(out) = by
     }else{ out <- parsembed(out.tb,by) }
     return(out)
