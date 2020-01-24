@@ -26,10 +26,8 @@ def parseArgs() :
             help="number of parallel processes (default : 2 )")
     parser.add_argument('-v','--verbose', action='store_true',default=False,
             help="verbose output")
-    parser.add_argument('-c','--cpg',type=os.path.abspath,required=True,
-            help="gpc methylation bed - sorted, bgzipped, and indexed")
-    parser.add_argument('-g','--gpc',type=os.path.abspath,required=False,
-            default=None,help="gpc methylation bed - sorted, bgzipped, and indexed")
+    parser.add_argument('-m','--mbed',type=os.path.abspath,required=True,
+            default=None,help="cpggpc methylation bed - sorted, bgzipped, and indexed")
     parser.add_argument('-f','--fasta',type=os.path.abspath,required=False,
             default=None,help="fasta file - required for minimap2 alignments without --MD tag")
     parser.add_argument('-b','--bam',type=os.path.abspath,required=True,
@@ -40,7 +38,7 @@ def parseArgs() :
             help="windows in bed file (default: stdin)")
     parser.add_argument('-o','--out',type=str,required=False,default="stdout",
             help="output bam file (default: stdout)")
-    parser.add_argument('--groups',type=argparse.FileType('w'),required = False,
+    parser.add_argument('--groups',type=argparse.FileType('r'),required = False,
             help="optional read groups as a tsv (qname, group name)")
     parser.add_argument('--remove_poor',action='store_true',default=False,
             help="remove reads with no/poor methylation data (default False)")
@@ -66,19 +64,24 @@ class Unbuffered(object):
 
 
 # https://stackoverflow.com/questions/13446445/python-multiprocessing-safely-writing-to-a-file
-def listener(q,inbam,outbam,verbose=False) :
-    '''listens for messages on the q, writes to file. '''
+def listener(q,inbam,outbam,groups,verbose=False) :
+    ''' listens for messages on the q, writes to file. '''
     if verbose : print("writing output to {}".format(outbam),file=sys.stderr)
+    with pysam.AlignmentFile(inbam,'rb') as fh :
+        header = str(fh.header)
+    if groups != None :
+        values = set([ groups[x] for x in groups.keys() ])
+        for value in values :
+            new_header = "@RG\tID:" + value + "\n"
+            header += new_header
     if outbam == "stdout" :
         # write output to stdout
         f = sys.stdout
-        with pysam.AlignmentFile(inbam,'rb') as fh :
-            print(fh.header,file=f)
+        print(header,file=f)
         def printread(m,out_fh) :
             print(m,file=out_fh)
     else : 
-        with pysam.AlignmentFile(inbam,'rb') as fh :
-            f = pysam.AlignmentFile(outbam, 'wb',template = fh) 
+        f = pysam.AlignmentFile(outbam, 'wb',text = header) 
         def printread(m,out_fh) :
             read = pysam.AlignedSegment.fromstring(m,out_fh.header)
             out_fh.write(read)
@@ -93,6 +96,10 @@ def listener(q,inbam,outbam,verbose=False) :
         if m == 'kill':
             break
         fields = m.split("\t")
+        try : 
+            qgroup = groups[fields[0]]
+            m += "\tRG:Z:" + qgroup
+        except KeyError : pass
         qname = ':'.join([fields[0],fields[2],fields[3]])
         if not index(qname_list,qname) : 
 #            if verbose: print(qname,file=sys.stderr)
@@ -125,19 +132,23 @@ def read_tabix(fpath,window) :
     with pysam.TabixFile(fpath) as tabix :
         entries = [x for x in tabix.fetch(window)]
     reads = [MethRead(x) for x in entries]
-    rdict = dict()
+    cgdict = dict()
+    gcdict = dict()
     # for split-reads, multiple entries are recorded per read name
     for meth in reads :
         qname = meth.qname
-        if qname in rdict.keys() :
-            rdict[qname] = np.append(rdict[qname],meth.callarray,0)
-        else : 
-            rdict[qname] = meth.callarray
-    return rdict
-
-def convert_cpg(bam,cpg,gpc) :
-    # only cpg
-    return change_sequence(bam,cpg,"cpg")
+        mod = meth.fields[-1]
+        if mod == "CG" :
+            if qname in cgdict.keys() :
+                cgdict[qname] = np.append(cgdict[qname],meth.callarray,0)
+            else : 
+                cgdict[qname] = meth.callarray
+        elif mod == "GC" :
+            if qname in gcdict.keys() :
+                gcdict[qname] = np.append(gcdict[qname],meth.callarray,0)
+            else : 
+                gcdict[qname] = meth.callarray
+    return cgdict,gcdict
 
 def convert_nome(bam,cpg,gpc) :
     # cpg and gpc
@@ -202,49 +213,36 @@ def change_sequence(bam,calls,mod="cpg") :
     bam.query_sequence = ''.join(seq)
     return changed,bam
 
-def convertBam(bampath,genome_seq,cfunc,cpgpath,gpcpath,window,remove_poor,verbose,q) :
+def convertBam(bampath,genome_seq,mbedpath,window,groups,remove_poor,verbose,q) :
     if verbose == "debug" : print("reading {} from bam file".format(window),file=sys.stderr)
     with pysam.AlignmentFile(bampath,"rb") as bam :
         bam_entries = [x for x in bam.fetch(region=window)]
     if verbose == "debug" : 
         print("{} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     if len(bam_entries) == 0 : return
-    if verbose == "debug" : print("reading {} from cpg data".format(window),file=sys.stderr)
+    if verbose == "debug" : print("reading {} from mbed".format(window),file=sys.stderr)
     try : 
-        cpg_calldict = read_tabix(cpgpath,window)
+        cgdict,gcdict = read_tabix(mbedpath,window)
         if verbose == "debug" : 
-            print("{} entries in cpg data".format(
-                len(cpg_calldict.keys())),file=sys.stderr)
+            print("{} entries in cpg, {} entries in gpc".format(
+                len(cgdict.keys()), len(gcdict.keys())),file=sys.stderr)
     except ValueError :
         if verbose :
-            print("No CpG methylation in {}, moving on".format(window),file=sys.stderr)
-        return
-    if verbose == "debug" : 
-        print("reading {} from gpc data".format(window),file=sys.stderr)
-    try: 
-        gpc_calldict = read_tabix(gpcpath,window)
-        if verbose == "debug" : 
-            print("{} entries in cpg data".format(
-                len(gpc_calldict.keys())),file=sys.stderr)
-    except TypeError : 
-        gpc_calldict = cpg_calldict # no gpc provided, repace with cpg for quick fix
-    except ValueError :
-        if verbose :
-            print("No GpC methylation in {}, moving on".format(window),file=sys.stderr)
+            print("No data in {}, moving on".format(window),file=sys.stderr)
         return
     if verbose == "debug" : 
         print("converting {} reads in {}".format(len(bam_entries),window),file=sys.stderr)
     i = 0
     for bam in bam_entries :
         qname = bam.query_name
-        try : cpg = cpg_calldict[qname]
+        try : cpg = cgdict[qname]
         except KeyError : 
             cpg = 0
-        try : gpc = gpc_calldict[qname]
+        try : gpc = gcdict[qname]
         except KeyError : 
             gpc = 0
         newbam = reset_bam(bam,genome_seq)
-        changed,convertedbam = cfunc(newbam,cpg,gpc)
+        changed,convertedbam = convert_nome(newbam,cpg,gpc)
         if not changed :
             if remove_poor :
                 continue
@@ -265,6 +263,12 @@ def main() :
             print("converting the whole genome",file=sys.stderr)
         windows = get_windows_from_bam(args.bam,100000)
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
+    # groups?
+    if args.groups :
+        groups = dict()
+        for line in args.groups :
+            fields = line.strip().split("\t")
+            groups[fields[0]] = fields[1]
     # read in fasta
     if args.fasta :
         fasta = pysam.FastaFile(args.fasta)
@@ -274,10 +278,7 @@ def main() :
     pool = mp.Pool(processes=args.threads)
     if args.verbose : print("using {} parallel processes".format(args.threads),file=sys.stderr)
     # watcher for output
-    watcher = pool.apply_async(listener,(q,args.bam,args.out,args.verbose))
-    # which convert function
-    if args.gpc is None : converter = convert_cpg
-    else : converter = convert_nome
+    watcher = pool.apply_async(listener,(q,args.bam,args.out,groups,args.verbose))
     # start processing
     if args.fasta : 
         jobs = list()
@@ -285,12 +286,10 @@ def main() :
             chrom,start,end = coord_to_bed(win)
             seq = fasta.fetch(reference=chrom).upper()
             jobs.append(pool.apply_async(convertBam,
-                args = (args.bam,seq,converter,args.cpg,args.gpc,
-                    win,args.remove_poor,args.verbose,q)))
+                args = (args.bam,seq,args.mbed,win,groups,args.remove_poor,args.verbose,q)))
     else : 
         jobs = [ pool.apply_async(convertBam,
-            args = (args.bam,0,converter,args.cpg,args.gpc,
-                win,args.remove_poor,args.verbose,q))
+            args = (args.bam,0,args.mbed,win,groups,args.remove_poor,args.verbose,q))
             for win in windows ]
     output = [ p.get() for p in jobs ]
     # done

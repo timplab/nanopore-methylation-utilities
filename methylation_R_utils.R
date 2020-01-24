@@ -3,7 +3,11 @@
 library(Rsamtools)
 library(GenomicRanges)
 
+############################################################
+#
 # data reading
+#
+############################################################
 read_data <- function(infp){
     if (infp == "stdin"){
         infp <- file(infp)
@@ -28,6 +32,11 @@ GRangesTobed <- function(data){
     dat.tb[,c(bedcols,extracols)]
 }
 
+############################################################
+#
+# tabix functions
+#
+############################################################
 tabix <- function(querypath,dbpath,col_names=NULL,verbose=TRUE){
         if ("GRanges" %in% class(dbpath)){
             # input region is a GRanges object
@@ -54,31 +63,51 @@ tabix <- function(querypath,dbpath,col_names=NULL,verbose=TRUE){
             distinct()
 }
 
-mbedByCall <- function(mbed,verbose=T){
+mbedByCall <- function(mbed,region = NULL,pad = 2000, verbose=T){
     if (verbose) cat("parsing data into single call per line\n")
-    out.list=lapply(seq(dim(mbed)[1]),function(i){
-        #if (verbose) cat(paste0(i,"\n"))
-        read=mbed[i,]
-        mstring=read$mstring    
-        call=str_extract_all(mstring,"[a-z]")[[1]]
-        pos=cumsum(as.numeric(strsplit(mstring,"[a-z]")[[1]]))
-        out=tibble(chrom=read$chrom,
-               start=read$start+pos+1,
-               end=start,
-               qname=read$readname,
-               mcall=call,
-               score=as.numeric(strsplit(read$scores,",")[[1]]),
-               context=strsplit(read$context,",")[[1]]
-               )
-        out$mcall[which(out$mcall=="m")]=1
-        out$mcall[which(out$mcall=="u")]=0
-        out$mcall[which(out$mcall=="x")]=NA
-        out$mcall=as.numeric(out$mcall)
-        if ( dim(out)[1] == 0 ) return(out)
-        #if (verbose) cat(paste0("done with ",i,"\n"))
-        out
-    })
-    calls = do.call(rbind,out.list)
+    calls = NA
+    if (nrow(mbed) != 0){
+      if (is.null(region)) {
+        out.list=lapply(seq(dim(mbed)[1]),function(i){
+            read=mbed[i,]
+            mstring=read$mstring    
+            call=str_extract_all(mstring,"[a-z]")[[1]]
+            pos=cumsum(as.numeric(strsplit(mstring,"[a-z]")[[1]]))
+            out=tibble(chrom=read$chrom,
+                   start=read$start+pos+1,
+                   end=start,
+                   qname=read$readname,
+                   mcall=call,
+                   score=as.numeric(strsplit(read$scores,",")[[1]]),
+                   context=strsplit(read$context,",")[[1]]
+                   )
+            out
+        })
+      } else {
+        regstart <- region$start - pad
+        regend <- region$end + pad
+        out.list=lapply(seq(dim(mbed)[1]),function(i){
+            read=mbed[i,]
+            mstring=read$mstring    
+            call=str_extract_all(mstring,"[a-z]")[[1]]
+            pos=cumsum(as.numeric(strsplit(mstring,"[a-z]")[[1]]))
+            out=tibble(chrom=read$chrom,
+                   start=read$start+pos+1,
+                   end=start,
+                   qname=read$readname,
+                   mcall=call,
+                   score=as.numeric(strsplit(read$scores,",")[[1]]),
+                   context=strsplit(read$context,",")[[1]]
+                   )
+            out[out$start >= regstart & out$start <= regend,] # region
+        })
+      }
+      calls = do.call(rbind,out.list)
+      calls$mcall[which(calls$mcall=="m")]=1
+      calls$mcall[which(calls$mcall=="u")]=0
+      calls$mcall[which(calls$mcall=="x")]=NA
+      calls$mcall=as.numeric(calls$mcall)
+    }
     calls
 }
 
@@ -88,6 +117,14 @@ redo_mcall <- function(calls,thr) {
     mcall[calls$score < -thr] <- 0
     calls$mcall <- mcall
     calls
+}
+
+remove_fully_methylated <- function(reads,thr = 0.9){
+  mcount <- str_count(reads$mstring,"m")
+  ucount <- str_count(reads$mstring,"u")
+  frac <- (mcount + 1)/(mcount + ucount + 1)
+  keepi <- frac < thr
+  reads[keepi,]
 }
     
 tabix_mbed <- function(querypath,dbpath=NULL,by=c("read","call"),extcol = NULL,verbose=TRUE){
@@ -144,10 +181,12 @@ tabix_mfreq <- function(querypath,dbpath=NULL,cov=2,trinuc_exclude="GCG",verbose
     out.tb$end=out.tb$start
     na.omit(out.tb)
 }
-# functions
-getCenter <- function(db.gr){
-    resize(shift(db.gr,shift=width(db.gr)/2),width=1,ignore.strand=T)
-}
+
+############################################################
+#
+# Bulk Methylation
+#
+############################################################
 getRegionMeth <- function(query,subject,thr=2,verbose=TRUE){
     if (class(query)[1] != "GRanges") {
         if (verbose) cat("converting data to GRanges\n")
@@ -168,24 +207,6 @@ getRegionMeth <- function(query,subject,thr=2,verbose=TRUE){
                   freq=mean(freq))
 }
 
-    
-getDistance <- function(query,subject){
-    # input subject to this must be center of features (done with getCenter)
-    cat("getting distances\n")
-    if (class(query)[1] != "GRanges") query=GRanges(query)
-    if (class(subject)[1] != "GRanges") subject=Granges(subject)
-    nearest.idx=nearest(query,subject,ignore.strand=T)
-    sub.hit=subject[nearest.idx]
-    dist.tb=tibble(index.feature=nearest.idx,
-                   chrom.feature=as.character(seqnames(sub.hit)),
-                   start.feature=start(sub.hit),
-                   end.feature=end(sub.hit),
-                   strand.feature=as.character(strand(sub.hit)),
-                   dist=ifelse(strand.feature=="-",
-                               end.feature-start(query),
-                               start(query)-start.feature))
-    dist.tb
-}
 calculate_rollmean <- function(dat.tb,rollrange=NULL,win=50){
     rollmeans=numeric()
     tbout = FALSE
@@ -227,7 +248,7 @@ aggregate_methylation <- function(dat.dist,win=50){
     }
     dat.ag=dat.dist%>%
         group_by(dist)%>%
-            summarize(freq=mean(freq)) %>%
+            summarize(freq=mean(freq, na.rm = T)) %>%
         na.omit()
     roll.range=seq(from=min(dat.ag$dist)+win/2,
                    to=max(dat.ag$dist)-win/2,by=1)
@@ -251,7 +272,11 @@ bin_pairwise_methylation <- function(data,bin_number=75,saturation_quantile=0.9)
     hist
 }
 
-# bsseq
+############################################################
+#
+# BSseq
+#
+############################################################
 mfreqToBsseq <- function(data,pd,label="samp",fill=0){
     # rename to make compatible
     names(data)[which(names(data)==label)]="sample"
@@ -280,3 +305,152 @@ mfreqToBsseq <- function(data,pd,label="samp",fill=0){
     bismark
 }
 
+############################################################
+#
+# Smoothing and single-read
+#
+############################################################
+# https://stackoverflow.com/questions/43875716/find-start-and-end-positions-indices-of-runs-consecutive-values
+getRuns <- function(calls, maxGap = NULL){
+  if (!is.null(maxGap)){
+    indices <- c(0,cumsum(diff(calls$start)> maxGap)) # based on difference to previous call
+    calls$indices <- indices
+    calls <- calls %>%
+      filter(mcall != -1) %>%
+      group_by(qname,indices)
+  } else { 
+    calls <- calls %>%
+      filter(mcall != -1) %>%
+      group_by(qname)
+  }
+  calls.list <- calls %>%
+    group_split(keep = F)
+  calls.keys <- calls %>%
+    group_keys()
+  runs.list <- lapply(calls.list,function(x){
+    if (length(unique(x$mcall)) == 1){
+      tibble(lengths = nrow(x),
+        values = x$mcall[1],
+        endi = lengths,
+        starti = 1,
+        start = min(x$start),
+        end = max(x$start) + 1,
+        width = end - start)
+    } else {
+      rle(x$mcall) %>%
+      unclass() %>% as_tibble() %>%
+      mutate( endi = cumsum(lengths),
+              starti = c(1,dplyr::lag(endi)[-1]+1),
+              start = x$start[starti],
+              end = x$start[endi] + 1,
+              width = end - start ) %>%
+        filter( width >= 0) # remove negative widths (in case of dups, etc.)
+    }
+  })
+  runs <- bind_rows(runs.list,.id = "run_index") 
+  runs$qname = calls.keys$qname[as.numeric(runs$run_index)]
+  runs[,-1]
+}
+getRuns_fast <- function(calls){
+  calls <- calls %>%
+    filter(mcall != -1) %>%
+    group_by(qname)
+  calls.list <- calls %>%
+    group_split(keep = F)
+  calls.keys <- calls %>%
+    group_keys()
+  runs.list <- lapply(calls.list,function(x){
+    rle(x$mcall) %>%
+    unclass() %>% as_tibble() %>%
+    mutate( endi = cumsum(lengths),
+            starti = c(1,dplyr::lag(endi)[-1]+1),
+            start = x$start[starti],
+            end = x$start[endi] + 1,
+            width = end - start ) %>%
+      filter( width >= 0) # remove negative widths (in case of dups, etc.)
+  })
+  runs <- bind_rows(runs.list,.id = "run_index") 
+  runs$qname = calls.keys$qname[as.numeric(runs$run_index)]
+  runs[,-1]
+}
+order_reads <- function(x,offset = 0, bounds=NULL, method = "jaccard"){
+  # get boundaries of reads if not provided
+  if (is.null(bounds)){
+    bounds <- x%>% group_by(qname) %>%
+      summarize(start = min(start),
+                end = max(end))
+    # label y based on order of smallest start
+    # label y based what's given
+    bounds<- bounds %>% #arrange(start, end) %>%
+      mutate(
+        readi = seq_len(length(unique(x$qname))),
+        ymin = -readi - 0.8 - offset, 
+        ymax = ymin + 0.6)
+  }
+  x <- x %>%
+    mutate(ymin = bounds$ymin[match(qname,bounds$qname)],
+           ymax = bounds$ymax[match(qname,bounds$qname)])
+  bounds <- bounds %>%
+    mutate(ymin = bounds$ymin[match(qname,bounds$qname)],
+           ymax = bounds$ymax[match(qname,bounds$qname)])
+  return(list(x = x,bounds = bounds))
+}
+smoothCalls <- function(calls,reg=NULL,bandwidth = 40){
+  calls <- calls %>%
+    mutate(mcall = ifelse(abs(score)>1,sign(score),score)) # ceiling based on log-lik ratio 
+  if (is.null(reg)) {
+    xpoints <- seq(min(calls$start),max(calls$start))
+  } else {
+    reg <- as_tibble(reg)
+    # pad by 1kb each side to include runs going outside the region
+    xpoints <- seq(reg$start-1000,reg$end+1000)
+  }
+  ks <- ksmooth(calls$start,calls$mcall,bandwidth = bandwidth,kernel = "normal",x.points = xpoints)
+  tibble(
+    start = ks$x,
+    llr_smooth = ks$y, 
+    mcall = case_when(
+      llr_smooth > 0 ~ 1,
+      llr_smooth < 0 ~ 0,
+      TRUE ~ -1)) 
+}
+smooth_reads_in_reg <- function(calls.reg,reg,bandwidth = 40){
+  # separate by read
+  calls.reg <- calls.reg %>%
+    group_by(qname)
+  group_names <- group_keys(calls.reg)$qname
+  calls.list <- calls.reg %>% 
+    group_split(keep = F)
+  names(calls.list) <- group_names
+  # smooth by read
+  smooth.list <- lapply(calls.list,smoothCalls,reg, bandwidth)
+  # return the combined tibble
+  bind_rows(smooth.list,.id = "qname")
+}
+
+############################################################
+#
+# Misc. functions
+#
+############################################################
+getCenter <- function(db.gr){
+    resize(shift(db.gr,shift=width(db.gr)/2),width=1,ignore.strand=T)
+}
+    
+getDistance <- function(query,subject){
+    # input subject to this must be center of features (done with getCenter)
+    cat("getting distances\n")
+    if (class(query)[1] != "GRanges") query=GRanges(query)
+    if (class(subject)[1] != "GRanges") subject=Granges(subject)
+    nearest.idx=nearest(query,subject,ignore.strand=T)
+    sub.hit=subject[nearest.idx]
+    dist.tb=tibble(index.feature=nearest.idx,
+                   chrom.feature=as.character(seqnames(sub.hit)),
+                   start.feature=start(sub.hit),
+                   end.feature=end(sub.hit),
+                   strand.feature=as.character(strand(sub.hit)),
+                   dist=ifelse(strand.feature=="-",
+                               end.feature-start(query),
+                               start(query)-start.feature))
+    dist.tb
+}
