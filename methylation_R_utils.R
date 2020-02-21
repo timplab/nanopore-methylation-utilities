@@ -119,7 +119,7 @@ redo_mcall <- function(calls,thr) {
     calls
 }
 
-remove_fully_methylated <- function(reads,thr = 0.9){
+remove_fully_methylated <- function(reads,thr = 0.7){
   mcount <- str_count(reads$mstring,"m")
   ucount <- str_count(reads$mstring,"u")
   frac <- (mcount + 1)/(mcount + ucount + 1)
@@ -271,6 +271,167 @@ bin_pairwise_methylation <- function(data,bin_number=75,saturation_quantile=0.9)
     hist = hist%>%mutate(count=ifelse(count>cutoff,cutoff,count))
     hist
 }
+gpcPeakCaller <- function(bsobj,minwin = 50,a = 0.01,cutoff = NULL, qcutoff = 0.99){
+  gpc.meth <- getMeth(bsobj,type="smooth",what="perBase")[,1]
+  # remove NA
+  keepi <- !is.na(gpc.meth)
+  bsobj <- bsobj[keepi,]
+  gpc.meth <- gpc.meth[keepi]
+  gpc.cov <- getCoverage(bsobj,type="Cov",what="perBase")[,1]
+  gpc.m <- getCoverage(bsobj,type="M",what="perBase")[,1]
+  ## compare to baseline ----
+  baseline <- median(gpc.meth,na.rm = T)
+  gpc.diff <- gpc.meth - baseline
+  if ( is.null(cutoff)) {
+    cutoff <- quantile(gpc.diff,qcutoff,na.rm = T)
+  }
+  gpc.direction <- ifelse(gpc.diff > cutoff, 1, -1) # cut off by qcutoff
+  gpc.gr <- granges(bsobj)
+  chrs <- as.character(seqnames(gpc.gr))
+  pos <- start(gpc.gr)
+  ## find regions of + ----
+  regions <- bsseq:::regionFinder3(gpc.direction,chrs,pos)$up
+  regions <- as_tibble(regions)
+  ## then add average and peak accesibility, along with coverage, then binomial test ---
+  regions <- regions %>%
+    rowwise() %>%
+    mutate(
+      coverage = sum(gpc.cov[idxStart:idxEnd]),
+      methylated = sum(gpc.m[idxStart:idxEnd]),
+      average = mean(gpc.meth[idxStart:idxEnd]),
+      peak = max(gpc.meth[idxStart:idxEnd]),
+      p.value = binom.test(methylated,coverage,baseline,alternative = "greater")$p.value
+    ) %>%
+    ungroup()
+  ## multiple test adjusting using FDR
+  regions$adjusted.pval  <- p.adjust(regions$p.value,"BH")
+
+  ## significance based on :
+  ## 1. width
+  ## 2. alpha
+  regions %>%
+    mutate(
+      width = end - start + 1,
+      sig = ifelse(
+        adjusted.pval <= a &
+          width >= minwin,"sig","insig"))
+}
+
+findDMRs <- function(bsobj,onei,twoi,regions = NULL,cutoffs = NULL,qcutoffs = c(0.01,0.99),min_width = 100, min_n = 4, a = 0.01){
+  bs.sub <- bsobj[,c(onei,twoi)]
+  if ( ! is.null(regions)){
+    message("subsetting data in regions ")
+    keepi <- which(overlapsAny(bs.sub,regions))
+    bs.sub <- bs.sub[keepi,]
+    # if regions provided, I don't want cutoffs
+    cutoffs = c(0,0)
+  }
+  meth <- as.matrix(getMeth(bs.sub,type="smooth",what="perBase"))
+  # remove NA
+  keepi <- rowSums(!is.na(meth)) == 2
+  bs.sub <- bs.sub[keepi,]
+  meth <- meth[keepi,]
+  cov.mat <- as.matrix(getCoverage(bs.sub,type="Cov",what="perBase"))
+  m.mat <- as.matrix(getCoverage(bs.sub,type="M",what="perBase"))
+  ## compare two to one
+  meth.diff <- meth[,2] - meth[,1]
+  if ( is.null(cutoffs)) {
+    cutoffs <- quantile(meth.diff,qcutoffs,na.rm = T)
+  }
+  directions <- rep(0L,length(meth.diff))
+  directions[which(meth.diff < cutoffs[1])] <- -1
+  directions[which(meth.diff > cutoffs[2])] <- 1
+  gr <- granges(bs.sub)
+  chrs <- as.character(seqnames(gr))
+  pos <- start(gr)
+  # find regions of significant differences  ----
+  regions.list <- bsseq:::regionFinder3(directions,chrs,pos)
+  regions <- as_tibble(bind_rows(regions.list,.id = "direction"))
+  # then add average and peak difference, along with coverage, and fishers exact test ---
+  regions <- regions %>%
+    rowwise() %>%
+    mutate(
+      cov_one = sum(cov.mat[idxStart:idxEnd,1]),
+      cov_two = sum(cov.mat[idxStart:idxEnd,2]),
+      meth_one = sum(m.mat[idxStart:idxEnd,1]),
+      meth_two = sum(m.mat[idxStart:idxEnd,2]),
+      average_one = mean(meth[idxStart:idxEnd,1]),
+      average_two = mean(meth[idxStart:idxEnd,2]),
+      meandiff = mean(meth.diff[idxStart:idxEnd]),
+      maxdiff = abs(max(meth.diff[idxStart:idxEnd])),
+      p.value = ifelse(direction == "up",
+        fisher.test(matrix(c(meth_two,cov_two-meth_two,meth_one,cov_one-meth_one),nrow = 2),alternative = "greater")$p.value,
+        fisher.test(matrix(c(meth_two,cov_two-meth_two,meth_one,cov_one-meth_one),nrow = 2),alternative = "less")$p.value)
+    ) %>%
+    ungroup()
+  # multiple test adjusting using FDR
+  regions$adjusted.pval  <- p.adjust(regions$p.value,"BH")
+  # significance test :
+  # 1. width
+  # 2. alpha
+  # 3. minsites
+  regions %>%
+    mutate(
+      width = end - start + 1,
+      sig = ifelse(
+        adjusted.pval <= a &
+          width >= min_width &
+          n >= min_n,"sig","insig"))
+}
+
+compareRegions <- function(bsobj,onei,twoi,regions, a = 0.01){
+  # instead of finding dmrs, compare regions provided
+  bs.sub <- bsobj[,c(onei,twoi)]
+  # subset region
+  regions.gr <- GRanges(regions)
+  message("subsetting data in region")
+  keepi <- which(overlapsAny(bs.sub,regions.gr))
+  bs.sub <- bs.sub[keepi,]
+  meth <- as.matrix(getMeth(bs.sub,type="smooth",what="perBase"))
+  cov.mat <- as.matrix(getCoverage(bs.sub,type="Cov",what="perBase"))
+  m.mat <- as.matrix(getCoverage(bs.sub,type="M",what="perBase"))
+  meth.diff <- meth[,2]-meth[,1]
+  chr <- as.character(seqnames(bs.sub))
+  pos <- as.character(start(bs.sub))
+  # get indexes
+  message("getting indexes of data in region")
+  ovl <- findOverlaps(bs.sub,regions.gr)
+  regs.idx <- as_tibble(ovl) %>% 
+    group_by(subjectHits) %>% 
+    summarize(idxStart = min(queryHits),
+          idxEnd = max(queryHits))
+  message("comparing")
+  # then do the comparison
+  regions <- regions[regs.idx$subjectHits,] %>% 
+    dplyr::select(chr,start,end) %>% 
+    bind_cols(regs.idx) %>% 
+    dplyr::select(-subjectHits) %>%
+    rowwise() %>%
+    mutate(
+      cov_one = sum(cov.mat[idxStart:idxEnd,1]),
+      cov_two = sum(cov.mat[idxStart:idxEnd,2]),
+      meth_one = sum(m.mat[idxStart:idxEnd,1]),
+      meth_two = sum(m.mat[idxStart:idxEnd,2]),
+      average_one = mean(meth[idxStart:idxEnd,1]),
+      average_two = mean(meth[idxStart:idxEnd,2]),
+      meandiff = mean(meth.diff[idxStart:idxEnd]),
+      maxdiff = sign(meandiff) * max(abs(meth.diff[idxStart:idxEnd])),
+      direction = ifelse(meandiff > 0, "up","down"),
+      p.value = ifelse(direction == "up",
+        fisher.test(matrix(c(meth_two,cov_two-meth_two,meth_one,cov_one-meth_one),nrow = 2),alternative = "greater")$p.value,
+        fisher.test(matrix(c(meth_two,cov_two-meth_two,meth_one,cov_one-meth_one),nrow = 2),alternative = "less")$p.value)
+    ) %>%
+    ungroup()
+  # multiple test adjusting using FDR
+  regions$adjusted.pval  <- p.adjust(regions$p.value,"BH")
+  # significance test :
+  # 1. alpha
+  regions %>%
+    mutate(
+      width = end - start + 1,
+      sig = ifelse(adjusted.pval <= a ,  "sig","insig"))
+}
+
 
 ############################################################
 #
@@ -311,8 +472,9 @@ mfreqToBsseq <- function(data,pd,label="samp",fill=0){
 #
 ############################################################
 # https://stackoverflow.com/questions/43875716/find-start-and-end-positions-indices-of-runs-consecutive-values
-getRuns <- function(calls, maxGap = NULL){
+getRuns <- function(calls, maxGap = NULL, pad = 0){
   if (!is.null(maxGap)){
+    pad = maxGap/4
     indices <- c(0,cumsum(diff(calls$start)> maxGap)) # based on difference to previous call
     calls$indices <- indices
     calls <- calls %>%
@@ -333,16 +495,16 @@ getRuns <- function(calls, maxGap = NULL){
         values = x$mcall[1],
         endi = lengths,
         starti = 1,
-        start = min(x$start),
-        end = max(x$start) + 1,
+        start = min(x$start) - pad,
+        end = max(x$start) + 1 + pad,
         width = end - start)
     } else {
       rle(x$mcall) %>%
       unclass() %>% as_tibble() %>%
       mutate( endi = cumsum(lengths),
               starti = c(1,dplyr::lag(endi)[-1]+1),
-              start = x$start[starti],
-              end = x$start[endi] + 1,
+              start = x$start[starti] - pad,
+              end = x$start[endi] + 1 + pad,
               width = end - start ) %>%
         filter( width >= 0) # remove negative widths (in case of dups, etc.)
     }
@@ -351,27 +513,27 @@ getRuns <- function(calls, maxGap = NULL){
   runs$qname = calls.keys$qname[as.numeric(runs$run_index)]
   runs[,-1]
 }
-getRuns_fast <- function(calls){
-  calls <- calls %>%
-    filter(mcall != -1) %>%
-    group_by(qname)
+getRuns_fast <- function(calls,mc.cores = 12,verbose = F){
+  if (verbose) { message("splitting reads by qname and chrom") }
+  calls <- calls[calls$mcall != -1,] %>%
+    group_by(chrom,qname)
   calls.list <- calls %>%
-    group_split(keep = F)
+    group_split(keep = T)
   calls.keys <- calls %>%
     group_keys()
-  runs.list <- lapply(calls.list,function(x){
+  runs.list <- mclapply(mc.cores = mc.cores, calls.list,function(x){
     rle(x$mcall) %>%
     unclass() %>% as_tibble() %>%
-    mutate( endi = cumsum(lengths),
-            starti = c(1,dplyr::lag(endi)[-1]+1),
-            start = x$start[starti],
-            end = x$start[endi] + 1,
-            width = end - start ) %>%
+    mutate( chrom = x$chrom[1],
+      qname = x$qname[1],
+      endi = cumsum(lengths),
+      starti = c(1,dplyr::lag(endi)[-1]+1), 
+      start = x$start[starti], 
+      end = x$start[endi] + 1, 
+      width = end - start ) %>%
       filter( width >= 0) # remove negative widths (in case of dups, etc.)
   })
-  runs <- bind_rows(runs.list,.id = "run_index") 
-  runs$qname = calls.keys$qname[as.numeric(runs$run_index)]
-  runs[,-1]
+  runs <- bind_rows(runs.list) 
 }
 order_reads <- function(x,offset = 0, bounds=NULL, method = "jaccard"){
   # get boundaries of reads if not provided
@@ -381,7 +543,7 @@ order_reads <- function(x,offset = 0, bounds=NULL, method = "jaccard"){
                 end = max(end))
     # label y based on order of smallest start
     # label y based what's given
-    bounds<- bounds %>% #arrange(start, end) %>%
+    bounds<- bounds %>% arrange(start, end) %>%
       mutate(
         readi = seq_len(length(unique(x$qname))),
         ymin = -readi - 0.8 - offset, 
@@ -395,7 +557,7 @@ order_reads <- function(x,offset = 0, bounds=NULL, method = "jaccard"){
            ymax = bounds$ymax[match(qname,bounds$qname)])
   return(list(x = x,bounds = bounds))
 }
-smoothCalls <- function(calls,reg=NULL,bandwidth = 40){
+smoothCalls <- function(calls,reg=NULL,bandwidth = 40,pad = 1000){
   calls <- calls %>%
     mutate(mcall = ifelse(abs(score)>1,sign(score),score)) # ceiling based on log-lik ratio 
   if (is.null(reg)) {
@@ -403,16 +565,22 @@ smoothCalls <- function(calls,reg=NULL,bandwidth = 40){
   } else {
     reg <- as_tibble(reg)
     # pad by 1kb each side to include runs going outside the region
-    xpoints <- seq(reg$start-1000,reg$end+1000)
+    xpoints <- seq(reg$start-pad,reg$end+pad)
   }
   ks <- ksmooth(calls$start,calls$mcall,bandwidth = bandwidth,kernel = "normal",x.points = xpoints)
-  tibble(
+  out <- tibble(
+    chrom = calls$chrom[1],
     start = ks$x,
+    end = start,
+    qname = calls$qname[1],
     llr_smooth = ks$y, 
     mcall = case_when(
       llr_smooth > 0 ~ 1,
       llr_smooth < 0 ~ 0,
-      TRUE ~ -1)) 
+      TRUE ~ -1)
+  )
+  out[out$mcall != -1,]
+
 }
 smooth_reads_in_reg <- function(calls.reg,reg,bandwidth = 40){
   # separate by read
@@ -426,6 +594,19 @@ smooth_reads_in_reg <- function(calls.reg,reg,bandwidth = 40){
   smooth.list <- lapply(calls.list,smoothCalls,reg, bandwidth)
   # return the combined tibble
   bind_rows(smooth.list,.id = "qname")
+}
+fix_protein_runs <- function(gcruns,mod){
+  # first split by value
+  gcruns_closed <- gcruns %>%
+    filter(values == 0)
+  gcruns_open <- gcruns %>%
+    filter(values == 1)
+  # predict using mod and get the probability of the run being in 1st cluster
+  prot_prob <- predict(mod,gcruns_closed$width)$z[,1]
+  # replace protein-bound calls with a open calls
+  gcruns_closed$values[which(prot_prob > 0.5)] <- 1
+  # recombine 
+  bind_rows(gcruns_open,gcruns_closed)
 }
 
 ############################################################

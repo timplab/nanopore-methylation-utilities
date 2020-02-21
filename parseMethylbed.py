@@ -25,7 +25,7 @@ def parseArgs() :
     parent_parser.add_argument('-v','--verbose',action='store_true',default=False,
             help="verbose output")
     parent_parser.add_argument('-m','--mod',type=str,required=False,
-            help="methylation motif (one of 'cpg' and 'gpc', default cpg)",default="cpg")
+            help="methylation motif (one of 'cpg','gpc' and 'cpggpc', default cpg)",default="cpg")
     # parser for frequency
     parser_freq = subparsers.add_parser('frequency',parents=[parent_parser],
             help = 'get frequency - mbed *must* be sorted')
@@ -154,6 +154,13 @@ def getFreq(args,in_fh):
         sites[key].printFreq(args.motif,args.out)
 
 def getReadlevel(args,in_fh):
+    if args.mod == "cpggpc" : 
+        # output the motif too if supplied a cpggcp mbed file
+        def print_func(outlist,read,args) :
+            print(*outlist + [read.fields[-1]],sep="\t",file=args.out)
+    else :
+        def print_func(outlist,read,args) :
+            print(*outlist,sep="\t",file=args.out)
     for line in in_fh:
         try : 
             line = line.decode('ascii')
@@ -163,9 +170,10 @@ def getReadlevel(args,in_fh):
         callkeys=sorted(read.calldict)
         for key in callkeys:
             methcall=read.calldict[key]
-            outlist=[read.rname]+[str(x) for x in methcall]
-            outlist.insert(3,read.qname)
-            print("\t".join(outlist),file=args.out)
+#            outlist=[read.rname]+[str(x) for x in methcall]
+            outlist = [ read.rname, methcall.pos, methcall.pos + 1,
+                    methcall.call, read.qname, methcall.ratio, methcall.seq ]
+            print_func(outlist,read,args)
 
 def getMethIntersect(args,in_fh) :
     for line in in_fh : 
