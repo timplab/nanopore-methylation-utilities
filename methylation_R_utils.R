@@ -119,7 +119,7 @@ redo_mcall <- function(calls,thr) {
     calls
 }
 
-remove_fully_methylated <- function(reads,thr = 0.7){
+remove_fully_methylated <- function(reads,thr = 0.5){
   mcount <- str_count(reads$mstring,"m")
   ucount <- str_count(reads$mstring,"u")
   frac <- (mcount + 1)/(mcount + ucount + 1)
@@ -309,15 +309,19 @@ gpcPeakCaller <- function(bsobj,minwin = 50,a = 0.01,cutoff = NULL, qcutoff = 0.
   ## significance based on :
   ## 1. width
   ## 2. alpha
+  ## 3. minimum peak height
+  minpeak <- 0 #baseline + 2 * cutoff 
   regions %>%
     mutate(
       width = end - start + 1,
       sig = ifelse(
         adjusted.pval <= a &
-          width >= minwin,"sig","insig"))
+          width >= minwin &
+          peak >= minpeak
+          ,"sig","insig"))
 }
 
-findDMRs <- function(bsobj,onei,twoi,regions = NULL,cutoffs = NULL,qcutoffs = c(0.01,0.99),min_width = 100, min_n = 4, a = 0.01){
+findDMRs <- function(bsobj,onei,twoi,regions = NULL,maxGap = 300,cutoffs = NULL,qcutoffs = 0.9,min_width = 100, min_n = 4, a = 0.01,verbose = T){
   bs.sub <- bsobj[,c(onei,twoi)]
   if ( ! is.null(regions)){
     message("subsetting data in regions ")
@@ -336,7 +340,17 @@ findDMRs <- function(bsobj,onei,twoi,regions = NULL,cutoffs = NULL,qcutoffs = c(
   ## compare two to one
   meth.diff <- meth[,2] - meth[,1]
   if ( is.null(cutoffs)) {
-    cutoffs <- quantile(meth.diff,qcutoffs,na.rm = T)
+    if (length(qcutoffs) == 2){
+      cutoffs <- quantile(meth.diff,qcutoffs,na.rm = T)
+    } else if (length(qcutoffs) == 1){
+      # symmetric cutoffs, make quantile 2x
+      qcutoffs <- 1 - 2 * (1 - qcutoffs)
+      cutoff <- quantile(abs(meth.diff),qcutoffs,na.rm = T)
+      cutoffs <- c(-cutoff,cutoff)
+    }
+    if (verbose) {
+      message("qcutoffs two-tailed : ", paste(qcutoffs,collapse=" , "), " ; ","cutoffs : ",paste(cutoffs,collapse=" , "))
+    }
   }
   directions <- rep(0L,length(meth.diff))
   directions[which(meth.diff < cutoffs[1])] <- -1
@@ -345,7 +359,7 @@ findDMRs <- function(bsobj,onei,twoi,regions = NULL,cutoffs = NULL,qcutoffs = c(
   chrs <- as.character(seqnames(gr))
   pos <- start(gr)
   # find regions of significant differences  ----
-  regions.list <- bsseq:::regionFinder3(directions,chrs,pos)
+  regions.list <- bsseq:::regionFinder3(directions,chrs,pos,maxGap = maxGap)
   regions <- as_tibble(bind_rows(regions.list,.id = "direction"))
   # then add average and peak difference, along with coverage, and fishers exact test ---
   regions <- regions %>%
@@ -402,8 +416,8 @@ compareRegions <- function(bsobj,onei,twoi,regions, a = 0.01){
           idxEnd = max(queryHits))
   message("comparing")
   # then do the comparison
-  regions <- regions[regs.idx$subjectHits,] %>% 
-    dplyr::select(chr,start,end) %>% 
+  regions <- as_tibble(regions.gr[regs.idx$subjectHits]) %>% 
+    dplyr::select(chr = seqnames,start,end) %>% 
     bind_cols(regs.idx) %>% 
     dplyr::select(-subjectHits) %>%
     rowwise() %>%
@@ -513,7 +527,7 @@ getRuns <- function(calls, maxGap = NULL, pad = 0){
   runs$qname = calls.keys$qname[as.numeric(runs$run_index)]
   runs[,-1]
 }
-getRuns_fast <- function(calls,mc.cores = 12,verbose = F){
+getRuns_fast <- function(calls,verbose = F){
   if (verbose) { message("splitting reads by qname and chrom") }
   calls <- calls[calls$mcall != -1,] %>%
     group_by(chrom,qname)
@@ -521,7 +535,7 @@ getRuns_fast <- function(calls,mc.cores = 12,verbose = F){
     group_split(keep = T)
   calls.keys <- calls %>%
     group_keys()
-  runs.list <- mclapply(mc.cores = mc.cores, calls.list,function(x){
+  runs.list <- lapply(calls.list,function(x){
     rle(x$mcall) %>%
     unclass() %>% as_tibble() %>%
     mutate( chrom = x$chrom[1],
@@ -535,19 +549,27 @@ getRuns_fast <- function(calls,mc.cores = 12,verbose = F){
   })
   runs <- bind_rows(runs.list) 
 }
-order_reads <- function(x,offset = 0, bounds=NULL, method = "jaccard"){
+order_reads <- function(x,offset = 0, bounds=NULL, qorder = NULL){
   # get boundaries of reads if not provided
   if (is.null(bounds)){
-    bounds <- x%>% group_by(qname) %>%
+    bounds <- x %>% group_by(qname) %>%
       summarize(start = min(start),
                 end = max(end))
     # label y based on order of smallest start
-    # label y based what's given
-    bounds<- bounds %>% arrange(start, end) %>%
-      mutate(
-        readi = seq_len(length(unique(x$qname))),
-        ymin = -readi - 0.8 - offset, 
-        ymax = ymin + 0.6)
+    # if q order is given, use this to order
+    if (!is.null(qorder)) {
+      bounds <- bounds %>%
+        mutate(qname = factor(qname,levels = qorder)) %>%
+        arrange(qname) 
+    } else {
+      bounds<- bounds %>% 
+        arrange(start, end) 
+    }
+    bounds <- bounds %>%
+        mutate(
+          readi = seq_len(length(unique(x$qname))),
+          ymin = -readi - 0.8 - offset, 
+          ymax = ymin + 0.6)
   }
   x <- x %>%
     mutate(ymin = bounds$ymin[match(qname,bounds$qname)],
@@ -557,7 +579,7 @@ order_reads <- function(x,offset = 0, bounds=NULL, method = "jaccard"){
            ymax = bounds$ymax[match(qname,bounds$qname)])
   return(list(x = x,bounds = bounds))
 }
-smoothCalls <- function(calls,reg=NULL,bandwidth = 40,pad = 1000){
+smoothCalls_deprecated <- function(calls,reg=NULL,bandwidth = 40,pad = 1000){
   calls <- calls %>%
     mutate(mcall = ifelse(abs(score)>1,sign(score),score)) # ceiling based on log-lik ratio 
   if (is.null(reg)) {
@@ -580,8 +602,43 @@ smoothCalls <- function(calls,reg=NULL,bandwidth = 40,pad = 1000){
       TRUE ~ -1)
   )
   out[out$mcall != -1,]
-
 }
+smoothCalls <- function(calls,what = c("all","site"),reg=NULL,bandwidth = 40,thr = 0.2,pad = 1000){
+  # "what" is whether I'm only calling on the sites or estimating every nucleotide; default all
+  if (length(what) != 1){ what = "all" }
+  calls <- calls %>%
+    mutate(mcall = ifelse(abs(score)>1,sign(score),score)) # ceiling based on log-lik ratio 
+  if (is.null(reg)) {
+    if (what == "site"){ 
+      xpoints <- calls$start
+    } else if (what == "all"){ 
+      xpoints <- seq(min(calls$start),max(calls$start))
+    }
+  } else {
+    reg <- as_tibble(reg)
+    # pad by 1kb each side to include runs going outside the region
+    if ( what == "site"){
+      xpoints <- calls %>% 
+        filter(start >= reg$start - pad , start <= reg$end + pad) %>% 
+        .$start
+    } else if (what == "all") { 
+      xpoints <- seq(reg$start-pad,reg$end+pad)
+    }
+  }
+  ks <- ksmooth(calls$start,calls$mcall,bandwidth = bandwidth,kernel = "normal",x.points = xpoints)
+  tibble(
+    chrom = calls$chrom[1],
+    start = ks$x,
+    end = start,
+    qname = calls$qname[1],
+    llr_smooth = ks$y, 
+    mcall = case_when(
+      llr_smooth > thr ~ 1,
+      llr_smooth < -thr ~ 0,
+      TRUE ~ -1)
+  )
+}
+
 smooth_reads_in_reg <- function(calls.reg,reg,bandwidth = 40){
   # separate by read
   calls.reg <- calls.reg %>%
