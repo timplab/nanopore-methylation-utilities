@@ -6,7 +6,8 @@ Set of utilities for analyzing nanopore methylation data from the Timp Lab
 - [Citation](#cite)
 
 # <a name="bedstyle"></a> bed-style format methylation file
-------
+
+
 I convert the nanopolish methylation calling output into bed-style format, such that each line is
 
 |Contig |Start  |End  |Read name  |Methylation call string  |Log-likelihood ratios  |Motif context  |
@@ -26,7 +27,8 @@ tabix -p bed [methylation.bed.gz]
 ```
 
 # <a name="igv"></a>converting bam for igv
-------
+
+
 Using the converted bed-style methylation file, the original bam file can be "bisulfite converted _in silico_" for easy visualization on IGV via their bisulfite mode.
 There are three options for specifying the region to convert:
 - `-r,--regions` : for multiple regions, supply the bed file
@@ -49,7 +51,7 @@ The default output does not have MD tags, and MD tags are necessary for using py
 
 If you use this package in your work, please cite:
 
-> Lee, I. (2019). Simultaneous profiling of chromatin accessibility and methylation on human cell lines with nanopore sequencing.
+> Lee, I. et al. (2019). Simultaneous profiling of chromatin accessibility and methylation on human cell lines with nanopore sequencing.
 > *bioRxiv*. [doi:10.1101/504993v2][doi]
 
 
