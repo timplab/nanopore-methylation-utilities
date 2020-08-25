@@ -51,3 +51,6 @@ If you use this package in your work, please cite:
 
 > Lee, I. (2019). Simultaneous profiling of chromatin accessibility and methylation on human cell lines with nanopore sequencing.
 > *bioRxiv*. [doi:10.1101/504993v2][doi]
+
+
+[doi]: https://doi.org/10.1101/504993
