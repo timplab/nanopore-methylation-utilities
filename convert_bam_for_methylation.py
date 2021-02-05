@@ -38,6 +38,8 @@ def parseArgs() :
             help="window from index file to extract [chrom:start-end]")
     parser.add_argument('-r','--regions',type=argparse.FileType('r'),required=False, 
             help="windows in bed file (default: stdin)")
+    parser.add_argument('-s','--windowsize', type=int, required=False, default=100000,
+            help="size of windows to divide bam into")
     parser.add_argument('-o','--out',type=str,required=False,default="stdout",
             help="output bam file (default: stdout)")
     parser.add_argument('--groups',type=argparse.FileType('w'),required = False,
@@ -73,7 +75,7 @@ def listener(q,inbam,outbam,verbose=False) :
         # write output to stdout
         f = sys.stdout
         with pysam.AlignmentFile(inbam,'rb') as fh :
-            print(fh.header,file=f)
+            print(fh.header,file=f, end='')
         def printread(m,out_fh) :
             print(m,file=out_fh)
     else : 
@@ -263,7 +265,7 @@ def main() :
     else :
         if args.verbose : 
             print("converting the whole genome",file=sys.stderr)
-        windows = get_windows_from_bam(args.bam,100000)
+        windows = get_windows_from_bam(args.bam,args.windowsize)
     if args.verbose : print("{} regions to parse".format(len(windows)),file=sys.stderr)
     # read in fasta
     if args.fasta :
